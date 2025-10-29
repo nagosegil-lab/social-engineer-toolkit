@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 import pandas as pd
 
@@ -82,6 +82,31 @@ class MT5Client:
         self.ensure_symbol(symbol)
         tick = mt5.symbol_info_tick(symbol)
         return {"bid": float(tick.bid), "ask": float(tick.ask)}
+
+    def get_positions(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Return open positions. If symbol provided, filter by symbol."""
+        mt5 = self._require()
+        if symbol:
+            positions = mt5.positions_get(symbol=symbol)
+        else:
+            positions = mt5.positions_get()
+        result: List[Dict[str, Any]] = []
+        if positions is None:
+            return result
+        for p in positions:
+            result.append({
+                "ticket": int(p.ticket),
+                "symbol": str(p.symbol),
+                "type": int(p.type),  # 0=BUY,1=SELL
+                "volume": float(p.volume),
+                "price_open": float(p.price_open),
+                "sl": float(p.sl) if p.sl else None,
+                "tp": float(p.tp) if p.tp else None,
+                "profit": float(p.profit),
+                "magic": int(p.magic),
+                "time": int(p.time),
+            })
+        return result
 
     # --- trading ---
     def place_market_order(

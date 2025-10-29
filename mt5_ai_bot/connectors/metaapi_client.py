@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 import pandas as pd
 
@@ -107,6 +107,30 @@ class MetaApiClient:
             return {"bid": float(price.bid), "ask": float(price.ask)}
 
         return asyncio.run(_a_tick())
+
+    def get_positions(self, symbol: Optional[str] = None) -> List[Dict[str, Any]]:
+        conn = self._require()
+
+        async def _a_positions() -> List[Dict[str, Any]]:
+            pos = await conn.get_positions()
+            result: List[Dict[str, Any]] = []
+            for p in pos:
+                if symbol and p.symbol != symbol:
+                    continue
+                result.append({
+                    "id": p.id,
+                    "symbol": p.symbol,
+                    "type": 0 if p.type == 'POSITION_TYPE_BUY' else 1,
+                    "volume": float(p.volume),
+                    "price_open": float(p.price),
+                    "sl": float(p.sl) if getattr(p, 'sl', None) else None,
+                    "tp": float(p.tp) if getattr(p, 'tp', None) else None,
+                    "profit": float(getattr(p, 'unrealizedProfit', 0.0)),
+                    "magic": int(getattr(p, 'magic', 0) or 0),
+                })
+            return result
+
+        return asyncio.run(_a_positions())
 
     # --- trading ---
     def place_market_order(
