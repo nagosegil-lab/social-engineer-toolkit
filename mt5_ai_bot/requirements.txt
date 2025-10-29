@@ -1,0 +1,12 @@
+numpy
+pandas
+scikit-learn
+joblib
+python-dotenv
+requests
+
+# Optional: MetaApi cloud SDK (for connector=metaapi)
+# metaapi-cloud-sdk
+
+# Optional: MT5 terminal integration (install ONLY on Windows/VPS with MT5)
+# MetaTrader5
