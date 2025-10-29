@@ -1,0 +1,62 @@
+# Trading Bot .gitignore
+
+# Environment variables
+.env
+*.env
+
+# Model files
+models/
+*.pkl
+*.h5
+*.pt
+
+# Statistics and logs
+stats.json
+*.log
+logs/
+
+# MT5 data
+*.dat
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# SSL Certificates
+*.pem
+*.key
+*.crt
+
+# OS
+.DS_Store
+Thumbs.db
