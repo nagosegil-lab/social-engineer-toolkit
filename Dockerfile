@@ -1,24 +1,24 @@
-FROM ubuntu:latest
+FROM python:3.9-slim
 
-# Update sources and install git
-RUN apt-get update -y && apt-get install -y git python3-pip
+WORKDIR /app
 
-#Git configuration
-RUN git config --global user.name "YOUR NAME HERE" \
-    && git config --global user.email "YOUR EMAIL HERE"
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
 
-# Clone SETOOLKIT
-RUN git clone --depth=1 https://github.com/trustedsec/social-engineer-toolkit.git
+# Copy requirements and install Python dependencies
+COPY requirements_trading.txt .
+RUN pip install --no-cache-dir -r requirements_trading.txt
 
-# Change Working Directory
-WORKDIR /social-engineer-toolkit
+# Copy application code
+COPY . .
 
- # Install requirements
-RUN pip3 install -r requirements.txt
+# Create directories
+RUN mkdir -p trading_bot/ai/saved_models logs data backtest_results
 
-# Install SETOOLKIT
-RUN python3 setup.py 
+# Expose port
+EXPOSE 8080
 
-ENTRYPOINT [ "./setoolkit" ]
-
-    
+# Run the application
+CMD ["python", "main.py"]
