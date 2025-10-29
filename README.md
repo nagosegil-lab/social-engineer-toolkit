@@ -1,67 +1,214 @@
-# The Social-Engineer Toolkit (SET)
-* Copyright :copyright: 2020
-* Written by: David Kennedy (ReL1K) @HackingDave 
-* Company: [TrustedSec](https://www.trustedsec.com)
+# 📱 בוט מסחר נייד - MT5 + AI
 
-<br/>
+## תיאור
+בוט מסחר אוטומטי המתחבר ל-MetaTrader 5 ומשתמש ב-AI לניתוח שווקים וחיזוי. הבוט כולל ממשק נייד responsive שניתן לגשת אליו ישירות מהטלפון.
 
-## Description
-The Social-Engineer Toolkit is an open-source penetration testing framework designed for social engineering. SET has a number of custom attack vectors that allow you to make a believable attack quickly. SET is a product of TrustedSec, LLC – an information security consulting firm located in Cleveland, Ohio.
+## ✨ תכונות
 
-DISCLAIMER: This is *only* for testing purposes and can only be used where strict consent has been given. Do not use this for illegal purposes, period.
-Please read the LICENSE under readme/LICENSE for the licensing of SET. 
+- 🔌 **אינטגרציה מלאה עם MT5** - חיבור, קבלת נתונים וביצוע עסקאות
+- 🤖 **AI/ML לניתוח וחיזוי** - מודלים מתקדמים לזיהוי הזדמנויות מסחר
+- 📊 **ניתוח טכני מקיף** - RSI, MACD, Bollinger Bands ועוד
+- 📱 **ממשק נייד responsive** - עובד מצוין על טלפונים וטאבלטים
+- 🌐 **REST API** - גישה מלאה דרך API
+- ⚡ **עדכונים בזמן אמת** - מחירים, פוזיציות וניתוחים
 
-#### Supported platforms:
-* Linux
-* Mac OS X (experimental)
+## 📋 דרישות מערכת
 
-# Installation
+- Python 3.8+
+- MetaTrader 5 מותקן (לפונקציונליות מלאה)
+- חשבון MT5 פעיל
 
-## Install via requirements.txt
+## 🚀 התקנה
 
+### 1. שכפול הפרויקט
 ```bash
-pip3 install -r requirements.txt
-python3 setup.py 
+git clone <repository-url>
+cd mobile-trading-bot
 ```
 
-## Install SET
-=======
-#### Mac OS X
-You will need to use a virtual environment for the Python install if you are using an M2 Macbook with the following instructions in your CLI within the social-engineer-toolkit directory. 
+### 2. יצירת סביבה וירטואלית (מומלץ)
 ```bash
-    # to install dependencies, run the following:
-    python3 -m venv path/to/venv
-    source path/to/venv/bin/activate
-    python3 -m pip install -r requirements.txt
-
-    # to install SET
-    sudo python3 setup.py 
+python3 -m venv venv
+source venv/bin/activate  # ב-Linux/Mac
+# או
+venv\Scripts\activate  # ב-Windows
 ```
 
-<br/>
-
-## Installation
-#### Windows 10 WSL/WSL2 Kali Linux
+### 3. התקנת תלותיות
 ```bash
-sudo apt install set -y
+pip install -r requirements.txt
 ```
-Kali Linux on Windows 10 is a minimal installation so it doesn't have any tools installed.
-You can easily install Social Engineer Toolkit on WSL/WSL2 without needing pip using the above command.
 
-#### Linux
+**הערה:** אם יש בעיות עם `ta-lib`, ראה [מקורות נוספים](#פתרון-בעיות)
+
+### 4. הגדרת משתני סביבה
+
+צור קובץ `.env` בשורש הפרויקט:
+
 ```bash
-git clone https://github.com/trustedsec/social-engineer-toolkit/ setoolkit/
-cd setoolkit
-pip3 install -r requirements.txt
-python setup.py
+cp .env.example .env
 ```
-<br/>
 
-## SET Tutorial
-For a full document on how to use SET, [visit the SET user manual](https://github.com/trustedsec/social-engineer-toolkit/raw/master/readme/User_Manual.pdf).
+ערוך את הקובץ והכנס את פרטי MT5 שלך:
+```
+MT5_LOGIN=12345678
+MT5_PASSWORD=your_password
+MT5_SERVER=your_broker_server
+MT5_PATH=/path/to/mt5/terminal64.exe  # אופציונלי
+```
 
-<br/>
+## 🎯 שימוש
 
-## Bugs and enhancements
-For bug reports or enhancements, please open an [issue](https://github.com/trustedsec/social-engineer-toolkit/issues) here.
-<br/>
+### הפעלת השרת
+
+```bash
+python -m mobile_trading_bot.main
+```
+
+או:
+
+```bash
+uvicorn mobile_trading_bot.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+### גישה מממשק נייד
+
+1. פתח דפדפן בטלפון
+2. היכנס לכתובת: `http://<ip-address>:8000`
+   - **למחשב מקומי:** `http://localhost:8000`
+   - **לרשת מקומית:** `http://<ip-local>:8000`
+   - **לשרת מרוחק:** `http://<server-ip>:8000`
+
+### הגדרת MT5
+
+1. פתח את הטאב "הגדרות"
+2. הכנס את פרטי החשבון שלך:
+   - Login (מספר חשבון)
+   - Password (סיסמה)
+   - Server (שם השרת)
+3. לחץ על "התחבר ל-MT5"
+
+## 📖 מדריך שימוש
+
+### ביצוע עסקה
+
+1. עבור לטאב "מסחר"
+2. מלא את הפרטים:
+   - **סמל מסחר:** למשל `EURUSD`, `GBPUSD`
+   - **סוג עסקה:** קנייה או מכירה
+   - **כמות:** מספר lots (מינימום 0.01)
+   - **מחיר:** אופציונלי (להזמנות limit/stop)
+   - **Stop Loss / Take Profit:** בהתאמה
+3. לחץ על "ביצוע עסקה"
+
+### ניתוח AI
+
+1. עבור לטאב "AI ניתוח"
+2. הכנס סמל מסחר
+3. לחץ על "קבל ניתוח"
+4. המודל ינתח את השוק ויתן המלצה
+
+### אימון מודל AI
+
+1. בטאב "AI ניתוח", גלול למטה
+2. הכנס סמל מסחר
+3. בחר מספר תקופות (מומלץ 1000+)
+4. לחץ על "אימון מודל"
+5. המודל יאומן על נתונים היסטוריים ויישמר
+
+### צפייה בפוזיציות
+
+1. עבור לטאב "פוזיציות"
+2. תראה את כל הפוזיציות הפתוחות
+3. לחץ על "רענן" לעדכון
+4. לחץ על "סגור" לסגירת פוזיציה
+
+## 🔧 API Endpoints
+
+### MT5
+- `GET /api/v1/mt5/account` - מידע על חשבון
+- `POST /api/v1/mt5/connect` - התחברות ל-MT5
+- `GET /api/v1/mt5/price/{symbol}` - מחיר נוכחי
+- `POST /api/v1/mt5/order` - ביצוע עסקה
+- `GET /api/v1/mt5/positions` - פוזיציות פתוחות
+- `POST /api/v1/mt5/close/{ticket}` - סגירת פוזיציה
+
+### AI
+- `GET /api/v1/ai/predict/{symbol}` - חיזוי AI
+- `POST /api/v1/ai/train` - אימון מודל
+- `GET /api/v1/analysis/{symbol}` - ניתוח שוק
+
+## 🏗️ מבנה הפרויקט
+
+```
+mobile_trading_bot/
+├── main.py                 # נקודת כניסה ראשית
+├── api/                    # נתיבי API
+│   └── routes.py
+├── mt5/                    # מודול MT5
+│   ├── connection.py       # ניהול חיבור
+│   ├── trading.py         # ביצוע עסקאות
+│   └── data.py            # קבלת נתונים
+├── ai/                     # מודול AI
+│   ├── predictor.py       # חיזוי AI
+│   └── analyzer.py        # ניתוח טכני
+├── core/                   # לוגיקה מרכזית
+│   ├── config.py          # הגדרות
+│   └── logger.py          # לוגים
+└── mobile_interface/      # ממשק נייד
+    ├── index.html
+    ├── styles.css
+    └── app.js
+```
+
+## 🔒 אבטחה
+
+⚠️ **חשוב:**
+- לעולם אל תחלוק את פרטי החשבון שלך
+- השתמש בסיסמה חזקה
+- בדוק את הגדרות האבטחה לפני שימוש בחשבון אמיתי
+- התחל עם חשבון demo
+
+## 🐛 פתרון בעיות
+
+### שגיאת חיבור ל-MT5
+- ודא ש-MT5 מותקן ופועל
+- בדוק את פרטי ההתחברות
+- ודא שהשרת זמין
+
+### בעיה עם ta-lib
+```bash
+# Ubuntu/Debian
+sudo apt-get install ta-lib
+
+# MacOS
+brew install ta-lib
+
+# Windows - הורד מ: https://ta-lib.org/install/
+```
+
+### פורט תפוס
+שנה את הפורט ב-`config.py` או `.env`:
+```python
+PORT = 8001  # במקום 8000
+```
+
+## 📝 רישיון
+
+פרויקט זה הוא open source ומופץ תחת רישיון MIT.
+
+## ⚠️ אחריות
+
+בוט זה נועד לשימוש חינוכי ומחקר. השימוש בחשבון אמיתי הוא על אחריותך הבלעדית. המפתחים לא נושאים באחריות לכל הפסד כספי.
+
+## 🤝 תרומה
+
+תרומות יתקבלו בברכה! אנא פתח issue או pull request.
+
+## 📞 תמיכה
+
+לשאלות ותמיכה, פתח issue ב-GitHub.
+
+---
+
+**בהצלחה במסחר! 🚀**
