@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  trading-bot:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - MT5_LOGIN=${MT5_LOGIN}
+      - MT5_PASSWORD=${MT5_PASSWORD}
+      - MT5_SERVER=${MT5_SERVER}
+      - SYMBOL=${SYMBOL:-EURUSD}
+      - TIMEFRAME=${TIMEFRAME:-M15}
+      - LOT_SIZE=${LOT_SIZE:-0.01}
+      - MAX_POSITIONS=${MAX_POSITIONS:-3}
+      - STOP_LOSS_PIPS=${STOP_LOSS_PIPS:-50}
+      - TAKE_PROFIT_PIPS=${TAKE_PROFIT_PIPS:-100}
+      - MAX_DAILY_LOSS=${MAX_DAILY_LOSS:-100.0}
+      - MAX_DAILY_PROFIT=${MAX_DAILY_PROFIT:-500.0}
+      - DEBUG=${DEBUG:-False}
+    volumes:
+      - ./models:/app/models
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - trading-network
+
+networks:
+  trading-network:
+    driver: bridge
