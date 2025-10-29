@@ -62,6 +62,15 @@ For a full document on how to use SET, [visit the SET user manual](https://githu
 
 <br/>
 
+## Documentation
+- Developer docs and API reference live in `docs/`:
+  - Browse: `docs/index.md`
+  - Static API (no imports): `docs/api_md/index.md`
+  - Optional HTML API (if generated): `docs/api/index.html`
+  - Usage and examples: `docs/usage.md`, `docs/examples.md`
+
+<br/>
+
 ## Bugs and enhancements
 For bug reports or enhancements, please open an [issue](https://github.com/trustedsec/social-engineer-toolkit/issues) here.
 <br/>
