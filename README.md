@@ -57,8 +57,47 @@ python setup.py
 ```
 <br/>
 
-## SET Tutorial
-For a full document on how to use SET, [visit the SET user manual](https://github.com/trustedsec/social-engineer-toolkit/raw/master/readme/User_Manual.pdf).
+## Documentation
+
+### Comprehensive Documentation Suite
+This repository now includes comprehensive documentation covering all aspects of the Social Engineering Toolkit:
+
+- **[API Documentation](API_DOCUMENTATION.md)**: Complete reference for all public APIs, functions, and components
+- **[Usage Guide](USAGE_GUIDE.md)**: Step-by-step instructions and tutorials
+- **[Module Reference](MODULE_REFERENCE.md)**: Detailed reference for all modules and their functions
+- **[Examples and Tutorials](EXAMPLES_AND_TUTORIALS.md)**: Comprehensive examples and real-world scenarios
+- **[Configuration Guide](CONFIGURATION_GUIDE.md)**: Complete configuration reference
+- **[Security and Compliance](SECURITY_AND_COMPLIANCE.md)**: Legal, ethical, and security considerations
+- **[Comprehensive README](COMPREHENSIVE_README.md)**: Complete overview and quick start guide
+
+### Quick Start
+```bash
+# Install SET
+pip install set
+
+# Launch SET
+setoolkit
+
+# Or use the legacy launcher
+python src/core/set.py
+```
+
+### Basic Example - Credential Harvester
+```bash
+# Navigate to web attacks
+1) Social-Engineering Attacks
+   2) Website Attack Vectors
+       2) Credential Harvester Attack Method
+           1) Web Templates
+               2) Gmail
+               1) Site Cloner
+                   https://gmail.com
+               192.168.1.100
+               80
+```
+
+### Original Documentation
+For the original SET user manual, [visit the SET user manual](https://github.com/trustedsec/social-engineer-toolkit/raw/master/readme/User_Manual.pdf).
 
 <br/>
 
