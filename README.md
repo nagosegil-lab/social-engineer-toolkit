@@ -60,6 +60,15 @@ python setup.py
 ## SET Tutorial
 For a full document on how to use SET, [visit the SET user manual](https://github.com/trustedsec/social-engineer-toolkit/raw/master/readme/User_Manual.pdf).
 
+## AI + FBS module (Third Party)
+An AI-assisted Facebook Business Suite module is available in:
+
+- `modules/fbs_ai_assistant.py`
+
+Quickstart documentation:
+
+- `readme/AI_FBS_QUICKSTART.md`
+
 <br/>
 
 ## Bugs and enhancements
