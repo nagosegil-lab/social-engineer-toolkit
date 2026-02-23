@@ -23,8 +23,8 @@ except ImportError:
     mt5 = None
 
 
-MAIN = "AI Assistant for FBS Trading (MetaTrader 5)"
-AUTHOR = "Cursor AI"
+MAIN="AI Assistant for FBS Trading (MetaTrader 5)"
+AUTHOR="Cursor AI"
 
 DEFAULT_AI_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_AI_MODEL = "gpt-4o-mini"
