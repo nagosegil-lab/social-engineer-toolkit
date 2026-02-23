@@ -70,6 +70,7 @@ Quickstart documentation:
 - `readme/AI_FBS_QUICKSTART.md`
 
 The default profile is tuned for faster scalp-style entries/exits with risk controls.
+It now includes a built-in aggressive XAUUSD preset (`xau_scalp_aggressive`).
 
 <br/>
 

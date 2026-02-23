@@ -36,6 +36,7 @@ The module also uses:
 
 ### Trading defaults
 
+- `FBS_PROFILE_PRESET` (default: `xau_scalp_aggressive`)
 - `FBS_SYMBOL` (default: `XAUUSD`)
 - `FBS_TIMEFRAME` (default: `M5`)
 - `FBS_BARS` (default: `300`)
@@ -73,7 +74,26 @@ Manual fallback (if `FBS_FAST_PROFILE=n`):
 6. Review spread filter, SL/TP from ATR, and AI confirmation.
 7. Confirm order only if you want to proceed.
 
-## 4) Risk notice
+## 4) Presets
+
+Supported values for `FBS_PROFILE_PRESET`:
+
+- `xau_scalp_aggressive` (default): fast and tighter setup for XAUUSD.
+- `xau_scalp_balanced`: slower and more conservative than aggressive.
+- `custom`: full manual control from prompts / env vars.
+
+Aggressive preset baseline:
+
+- Timeframe `M1`
+- EMA `7/17`
+- RSI `6`
+- SL ATR multiplier `0.55`
+- TP ATR multiplier `1.35`
+- Min R:R `2.0`
+- AI confidence floor `0.72`
+- Spread filter `<= 35` points
+
+## 5) Risk notice
 
 - This module is a helper, not guaranteed profit.
 - Always test in demo account first.

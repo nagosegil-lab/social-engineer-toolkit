@@ -37,6 +37,42 @@ DEFAULT_MIN_RR = 1.5
 DEFAULT_SCALP_EMA_FAST = 9
 DEFAULT_SCALP_EMA_SLOW = 21
 DEFAULT_SCALP_RSI_PERIOD = 7
+DEFAULT_PROFILE_PRESET = "xau_scalp_aggressive"
+
+PROFILE_PRESETS = {
+    "xau_scalp_aggressive": {
+        "symbol": "XAUUSD",
+        "timeframe": "M1",
+        "bars": 500,
+        "risk_pct": 1.25,
+        "deviation": 30,
+        "max_spread_points": 35,
+        "fast_profile": True,
+        "ema_fast": 7,
+        "ema_slow": 17,
+        "rsi_period": 6,
+        "sl_atr_mult": 0.55,
+        "tp_atr_mult": 1.35,
+        "min_rr": 2.0,
+        "ai_min_confidence": 0.72,
+    },
+    "xau_scalp_balanced": {
+        "symbol": "XAUUSD",
+        "timeframe": "M5",
+        "bars": 350,
+        "risk_pct": 1.0,
+        "deviation": 20,
+        "max_spread_points": 45,
+        "fast_profile": True,
+        "ema_fast": 9,
+        "ema_slow": 21,
+        "rsi_period": 7,
+        "sl_atr_mult": 0.8,
+        "tp_atr_mult": 1.6,
+        "min_rr": 1.5,
+        "ai_min_confidence": 0.65,
+    },
+}
 
 
 class FbsAiError(Exception):
@@ -77,6 +113,41 @@ def _to_int(value, name):
         return int(value)
     except ValueError:
         raise FbsAiError("Invalid value for {0}: {1}".format(name, value))
+
+
+def _to_bool(value, default=False):
+    if value is None:
+        return default
+    text = str(value).strip().lower()
+    if text in ("y", "yes", "true", "1", "on"):
+        return True
+    if text in ("n", "no", "false", "0", "off"):
+        return False
+    return default
+
+
+def _resolve_preset(preset_name):
+    key = (preset_name or "").strip().lower()
+    if not key or key == "custom":
+        return None, "custom"
+    preset = PROFILE_PRESETS.get(key)
+    if preset is None:
+        raise FbsAiError(
+            "Unknown preset '{0}'. Use one of: {1} or custom.".format(
+                preset_name,
+                ", ".join(sorted(PROFILE_PRESETS.keys())),
+            )
+        )
+    return preset, key
+
+
+def _pick_value(env_name, preset, preset_key, fallback):
+    env_value = os.getenv(env_name)
+    if env_value is not None and env_value != "":
+        return env_value
+    if preset and preset_key in preset:
+        return preset[preset_key]
+    return fallback
 
 
 def _ema(values, period):
@@ -468,44 +539,94 @@ def main():
         input("\nPress <enter> to continue")
         return
 
-    symbol = _ask("Symbol", os.getenv("FBS_SYMBOL", DEFAULT_SYMBOL)).upper()
+    preset_name = _ask(
+        "Preset (xau_scalp_aggressive/xau_scalp_balanced/custom)",
+        os.getenv("FBS_PROFILE_PRESET", DEFAULT_PROFILE_PRESET),
+    )
+    try:
+        preset, preset_key = _resolve_preset(preset_name)
+    except FbsAiError as exc:
+        print("\n[!] {0}".format(exc))
+        input("\nPress <enter> to continue")
+        return
+
+    print("\n[*] Active preset: {0}".format(preset_key))
+
+    symbol = _ask(
+        "Symbol",
+        _pick_value("FBS_SYMBOL", preset, "symbol", DEFAULT_SYMBOL),
+    ).upper()
     timeframe_name = _ask(
         "Timeframe (M1/M5/M15/M30/H1/H4/D1)",
-        os.getenv("FBS_TIMEFRAME", DEFAULT_TIMEFRAME),
+        _pick_value("FBS_TIMEFRAME", preset, "timeframe", DEFAULT_TIMEFRAME),
     ).upper()
-    bars = _to_int(_ask("Number of candles", os.getenv("FBS_BARS", str(DEFAULT_BARS))), "bars")
-    risk_pct = _to_float(_ask("Risk percent per trade", os.getenv("FBS_RISK_PCT", "1.0")), "risk percent")
-    deviation = _to_int(_ask("Slippage/deviation", os.getenv("FBS_DEVIATION", "20")), "deviation")
+    bars = _to_int(
+        _ask("Number of candles", str(_pick_value("FBS_BARS", preset, "bars", DEFAULT_BARS))),
+        "bars",
+    )
+    risk_pct = _to_float(
+        _ask("Risk percent per trade", str(_pick_value("FBS_RISK_PCT", preset, "risk_pct", "1.0"))),
+        "risk percent",
+    )
+    deviation = _to_int(
+        _ask("Slippage/deviation", str(_pick_value("FBS_DEVIATION", preset, "deviation", "20"))),
+        "deviation",
+    )
     max_spread_points = _to_float(
-        _ask("Max spread points", os.getenv("FBS_MAX_SPREAD_POINTS", str(DEFAULT_MAX_SPREAD_POINTS))),
+        _ask(
+            "Max spread points",
+            str(_pick_value("FBS_MAX_SPREAD_POINTS", preset, "max_spread_points", DEFAULT_MAX_SPREAD_POINTS)),
+        ),
         "max spread points",
     )
 
-    fast_profile = _ask("Fast scalp profile? (y/n)", os.getenv("FBS_FAST_PROFILE", "y")).lower() != "n"
+    fast_default = _to_bool(_pick_value("FBS_FAST_PROFILE", preset, "fast_profile", True), default=True)
+    fast_profile = _to_bool(
+        _ask("Fast scalp profile? (y/n)", "y" if fast_default else "n"),
+        default=True,
+    )
 
     ema_fast_period = _to_int(
-        _ask("EMA fast period", os.getenv("FBS_EMA_FAST", str(DEFAULT_SCALP_EMA_FAST))),
+        _ask(
+            "EMA fast period",
+            str(_pick_value("FBS_EMA_FAST", preset, "ema_fast", DEFAULT_SCALP_EMA_FAST)),
+        ),
         "ema fast period",
     )
     ema_slow_period = _to_int(
-        _ask("EMA slow period", os.getenv("FBS_EMA_SLOW", str(DEFAULT_SCALP_EMA_SLOW))),
+        _ask(
+            "EMA slow period",
+            str(_pick_value("FBS_EMA_SLOW", preset, "ema_slow", DEFAULT_SCALP_EMA_SLOW)),
+        ),
         "ema slow period",
     )
     rsi_period = _to_int(
-        _ask("RSI period", os.getenv("FBS_RSI_PERIOD", str(DEFAULT_SCALP_RSI_PERIOD))),
+        _ask(
+            "RSI period",
+            str(_pick_value("FBS_RSI_PERIOD", preset, "rsi_period", DEFAULT_SCALP_RSI_PERIOD)),
+        ),
         "rsi period",
     )
 
     sl_atr_mult = _to_float(
-        _ask("SL ATR multiplier", os.getenv("FBS_SL_ATR_MULT", str(DEFAULT_SL_ATR_MULT))),
+        _ask(
+            "SL ATR multiplier",
+            str(_pick_value("FBS_SL_ATR_MULT", preset, "sl_atr_mult", DEFAULT_SL_ATR_MULT)),
+        ),
         "sl atr multiplier",
     )
     tp_atr_mult = _to_float(
-        _ask("TP ATR multiplier", os.getenv("FBS_TP_ATR_MULT", str(DEFAULT_TP_ATR_MULT))),
+        _ask(
+            "TP ATR multiplier",
+            str(_pick_value("FBS_TP_ATR_MULT", preset, "tp_atr_mult", DEFAULT_TP_ATR_MULT)),
+        ),
         "tp atr multiplier",
     )
     min_rr = _to_float(
-        _ask("Minimum risk-reward", os.getenv("FBS_MIN_RR", str(DEFAULT_MIN_RR))),
+        _ask(
+            "Minimum risk-reward",
+            str(_pick_value("FBS_MIN_RR", preset, "min_rr", DEFAULT_MIN_RR)),
+        ),
         "minimum risk-reward",
     )
 
@@ -525,7 +646,10 @@ def main():
     password = _ask_secret("MT5 password", os.getenv("FBS_MT5_PASSWORD"))
     server = _ask("MT5 server", os.getenv("FBS_MT5_SERVER", ""))
     mt5_path = _ask("MT5 terminal path (optional)", os.getenv("FBS_MT5_PATH", ""))
-    dry_run = _ask("Dry run only? (y/n)", os.getenv("FBS_DRY_RUN", "y")).lower() != "n"
+    dry_run = _to_bool(
+        _ask("Dry run only? (y/n)", os.getenv("FBS_DRY_RUN", "y")),
+        default=True,
+    )
 
     if not login_text or not password or not server:
         print("\n[!] MT5 login, password and server are required.")
@@ -560,18 +684,21 @@ def main():
         input("\nPress <enter> to continue")
         return
 
-    use_ai = _ask("Use AI confirmation layer? (y/n)", "y").lower() == "y"
+    use_ai = _to_bool(_ask("Use AI confirmation layer? (y/n)", "y"), default=True)
     ai_api_key = ""
     ai_model = DEFAULT_AI_MODEL
     ai_base_url = DEFAULT_AI_BASE_URL
-    min_ai_confidence = 0.65
+    min_ai_confidence = _to_float(
+        str(_pick_value("FBS_AI_MIN_CONFIDENCE", preset, "ai_min_confidence", "0.65")),
+        "minimum AI confidence",
+    )
 
     if use_ai:
         ai_base_url = _ask("AI base URL", os.getenv("AI_BASE_URL", DEFAULT_AI_BASE_URL))
         ai_model = _ask("AI model", os.getenv("AI_MODEL", DEFAULT_AI_MODEL))
         ai_api_key = _ask_secret("AI API key", os.getenv("AI_API_KEY"))
         min_ai_confidence = _to_float(
-            _ask("Minimum AI confidence (0-1)", os.getenv("FBS_AI_MIN_CONFIDENCE", "0.65")),
+            _ask("Minimum AI confidence (0-1)", str(min_ai_confidence)),
             "minimum AI confidence",
         )
         if min_ai_confidence < 0 or min_ai_confidence > 1:
@@ -616,7 +743,7 @@ def main():
 
         if fast_profile:
             base_action, base_reason = _scalp_signal(indicators)
-            strategy_name = "fast_scalp"
+            strategy_name = "{0}_fast_scalp".format(preset_key)
             sl_points, tp_points, rr = _quick_sl_tp_points(
                 indicators=indicators,
                 symbol_info=symbol_info,
@@ -626,7 +753,7 @@ def main():
             )
         else:
             base_action, base_reason = _base_signal(indicators)
-            strategy_name = "standard_signal"
+            strategy_name = "{0}_standard_signal".format(preset_key)
             sl_points = manual_sl_points
             tp_points = manual_tp_points
             rr = float(tp_points) / float(sl_points)
