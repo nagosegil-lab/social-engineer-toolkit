@@ -3,6 +3,7 @@ from __future__ import print_function
 
 import json
 import os
+from datetime import datetime
 
 import requests
 
@@ -38,6 +39,28 @@ DEFAULT_SCALP_EMA_FAST = 9
 DEFAULT_SCALP_EMA_SLOW = 21
 DEFAULT_SCALP_RSI_PERIOD = 7
 DEFAULT_PROFILE_PRESET = "xau_scalp_aggressive"
+DEFAULT_SESSION_MODE = "overlap"
+
+SESSION_WINDOWS_UTC = {
+    "london": (7, 16),
+    "newyork": (12, 21),
+    "overlap": (12, 16),
+}
+
+SESSION_ALIASES = {
+    "off": "off",
+    "none": "off",
+    "disable": "off",
+    "disabled": "off",
+    "london": "london",
+    "newyork": "newyork",
+    "new_york": "newyork",
+    "ny": "newyork",
+    "overlap": "overlap",
+    "london_newyork": "london_newyork",
+    "london-or-newyork": "london_newyork",
+    "london_or_newyork": "london_newyork",
+}
 
 PROFILE_PRESETS = {
     "xau_scalp_aggressive": {
@@ -55,6 +78,7 @@ PROFILE_PRESETS = {
         "tp_atr_mult": 1.35,
         "min_rr": 2.0,
         "ai_min_confidence": 0.72,
+        "session_mode": "overlap",
     },
     "xau_scalp_balanced": {
         "symbol": "XAUUSD",
@@ -71,6 +95,7 @@ PROFILE_PRESETS = {
         "tp_atr_mult": 1.6,
         "min_rr": 1.5,
         "ai_min_confidence": 0.65,
+        "session_mode": "london_newyork",
     },
 }
 
@@ -148,6 +173,59 @@ def _pick_value(env_name, preset, preset_key, fallback):
     if preset and preset_key in preset:
         return preset[preset_key]
     return fallback
+
+
+def _normalize_session_mode(mode):
+    key = str(mode or "").strip().lower()
+    if key not in SESSION_ALIASES:
+        raise FbsAiError(
+            "Invalid session mode '{0}'. Use: off/overlap/london/newyork/london_newyork.".format(
+                mode
+            )
+        )
+    return SESSION_ALIASES[key]
+
+
+def _is_hour_in_window(hour, start_hour, end_hour):
+    if start_hour <= end_hour:
+        return start_hour <= hour < end_hour
+    return hour >= start_hour or hour < end_hour
+
+
+def _session_gate(mode, now_utc=None):
+    normalized = _normalize_session_mode(mode)
+    if normalized == "off":
+        return True, "Session filter OFF."
+
+    now_utc = now_utc or datetime.utcnow()
+    hour = now_utc.hour
+    minute = now_utc.minute
+
+    if normalized == "london_newyork":
+        in_london = _is_hour_in_window(hour, *SESSION_WINDOWS_UTC["london"])
+        in_newyork = _is_hour_in_window(hour, *SESSION_WINDOWS_UTC["newyork"])
+        allowed = in_london or in_newyork
+        return (
+            allowed,
+            "Session gate {0} at {1:02d}:{2:02d} UTC".format(
+                normalized,
+                hour,
+                minute,
+            ),
+        )
+
+    start_hour, end_hour = SESSION_WINDOWS_UTC[normalized]
+    allowed = _is_hour_in_window(hour, start_hour, end_hour)
+    return (
+        allowed,
+        "Session gate {0} ({1:02d}-{2:02d} UTC) at {3:02d}:{4:02d} UTC".format(
+            normalized,
+            start_hour,
+            end_hour,
+            hour,
+            minute,
+        ),
+    )
 
 
 def _ema(values, period):
@@ -579,6 +657,16 @@ def main():
         ),
         "max spread points",
     )
+    session_mode = _ask(
+        "Session filter (off/overlap/london/newyork/london_newyork)",
+        str(_pick_value("FBS_SESSION_MODE", preset, "session_mode", DEFAULT_SESSION_MODE)),
+    )
+    try:
+        session_mode = _normalize_session_mode(session_mode)
+    except FbsAiError as exc:
+        print("\n[!] {0}".format(exc))
+        input("\nPress <enter> to continue")
+        return
 
     fast_default = _to_bool(_pick_value("FBS_FAST_PROFILE", preset, "fast_profile", True), default=True)
     fast_profile = _to_bool(
@@ -743,7 +831,7 @@ def main():
 
         if fast_profile:
             base_action, base_reason = _scalp_signal(indicators)
-            strategy_name = "{0}_fast_scalp".format(preset_key)
+            strategy_name = "{0}_{1}_fast_scalp".format(preset_key, session_mode)
             sl_points, tp_points, rr = _quick_sl_tp_points(
                 indicators=indicators,
                 symbol_info=symbol_info,
@@ -753,7 +841,7 @@ def main():
             )
         else:
             base_action, base_reason = _base_signal(indicators)
-            strategy_name = "{0}_standard_signal".format(preset_key)
+            strategy_name = "{0}_{1}_standard_signal".format(preset_key, session_mode)
             sl_points = manual_sl_points
             tp_points = manual_tp_points
             rr = float(tp_points) / float(sl_points)
@@ -764,6 +852,7 @@ def main():
         print("    RSI{0}: {1:.2f}".format(rsi_period, indicators["rsi"]))
         print("    ATR14: {0:.5f}".format(indicators["atr14"]))
         print("    Spread: {0:.2f} points".format(spread_now))
+        print("    Session mode: {0}".format(session_mode))
         print("\n[+] Base signal: {0} ({1})".format(base_action.upper(), base_reason))
         print("[+] Exit profile: SL={0} points, TP={1} points, R:R={2:.2f}".format(
             sl_points, tp_points, rr
@@ -775,6 +864,13 @@ def main():
                     spread_now, max_spread_points
                 )
             )
+            input("\nPress <enter> to continue")
+            return
+
+        session_allowed, session_msg = _session_gate(session_mode)
+        print("[+] {0}".format(session_msg))
+        if not session_allowed:
+            print("\n[*] Final decision: HOLD (Outside selected trading session).")
             input("\nPress <enter> to continue")
             return
 

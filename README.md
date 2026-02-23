@@ -71,6 +71,7 @@ Quickstart documentation:
 
 The default profile is tuned for faster scalp-style entries/exits with risk controls.
 It now includes a built-in aggressive XAUUSD preset (`xau_scalp_aggressive`).
+Automatic session filtering is included (e.g. London/New York overlap).
 
 <br/>
 

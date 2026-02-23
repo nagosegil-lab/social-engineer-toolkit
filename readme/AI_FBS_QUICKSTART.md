@@ -43,6 +43,7 @@ The module also uses:
 - `FBS_RISK_PCT` (default: `1.0`)
 - `FBS_DEVIATION` (default: `20`)
 - `FBS_MAX_SPREAD_POINTS` (default: `45`)
+- `FBS_SESSION_MODE` (default: `overlap`)
 - `FBS_FAST_PROFILE` (default: `y`)
 - `FBS_EMA_FAST` (default: `9`)
 - `FBS_EMA_SLOW` (default: `21`)
@@ -82,6 +83,14 @@ Supported values for `FBS_PROFILE_PRESET`:
 - `xau_scalp_balanced`: slower and more conservative than aggressive.
 - `custom`: full manual control from prompts / env vars.
 
+Session filter modes:
+
+- `off`
+- `overlap` (London/New York overlap, UTC 12:00-16:00)
+- `london` (UTC 07:00-16:00)
+- `newyork` (UTC 12:00-21:00)
+- `london_newyork` (London OR New York session)
+
 Aggressive preset baseline:
 
 - Timeframe `M1`
@@ -92,6 +101,7 @@ Aggressive preset baseline:
 - Min R:R `2.0`
 - AI confidence floor `0.72`
 - Spread filter `<= 35` points
+- Session filter `overlap`
 
 ## 5) Risk notice
 
