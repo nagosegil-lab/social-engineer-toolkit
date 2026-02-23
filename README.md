@@ -74,6 +74,8 @@ It now includes a built-in aggressive XAUUSD preset (`xau_scalp_aggressive`).
 Automatic session filtering is included (e.g. London/New York overlap).
 Session filters can run by UTC or broker clock, with weekend blocking.
 A simulation mode is included for environments without MetaTrader5 support.
+Guided setup script: `scripts/fbs_setup_assistant.py`.
+Launchers: `scripts/run_fbs_module_direct.sh`, `scripts/run_setoolkit_with_env.sh`.
 
 <br/>
 

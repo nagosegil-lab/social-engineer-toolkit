@@ -98,6 +98,31 @@ In simulation mode:
 - No live order is sent.
 - You still get full signal/session/risk flow and a dry-run order preview.
 
+### Guided local setup (recommended)
+
+Use the setup assistant to generate a local env file safely:
+
+```bash
+./scripts/fbs_setup_assistant.py
+```
+
+It creates:
+
+- `.fbs_trading.env` (git-ignored, permissions `600`)
+
+Then run:
+
+```bash
+set -a; source ./.fbs_trading.env; set +a
+./scripts/run_fbs_module_direct.sh
+```
+
+Or run full SET with env preloaded:
+
+```bash
+./scripts/run_setoolkit_with_env.sh
+```
+
 ## 4) Presets
 
 Supported values for `FBS_PROFILE_PRESET`:

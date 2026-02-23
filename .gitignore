@@ -74,6 +74,7 @@ celerybeat-schedule
 
 # dotenv
 .env
+.fbs_trading.env
 
 # virtualenv
 venv/
