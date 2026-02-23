@@ -28,8 +28,15 @@ AUTHOR = "Cursor AI"
 DEFAULT_AI_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_AI_MODEL = "gpt-4o-mini"
 DEFAULT_SYMBOL = "XAUUSD"
-DEFAULT_TIMEFRAME = "M15"
-DEFAULT_BARS = 250
+DEFAULT_TIMEFRAME = "M5"
+DEFAULT_BARS = 300
+DEFAULT_MAX_SPREAD_POINTS = 45
+DEFAULT_SL_ATR_MULT = 0.8
+DEFAULT_TP_ATR_MULT = 1.6
+DEFAULT_MIN_RR = 1.5
+DEFAULT_SCALP_EMA_FAST = 9
+DEFAULT_SCALP_EMA_SLOW = 21
+DEFAULT_SCALP_RSI_PERIOD = 7
 
 
 class FbsAiError(Exception):
@@ -115,6 +122,24 @@ def _rsi(values, period=14):
     return 100.0 - (100.0 / (1.0 + rs))
 
 
+def _atr(highs, lows, closes, period=14):
+    if len(closes) < period + 1:
+        raise FbsAiError("Not enough candle data for ATR({0}).".format(period))
+
+    true_ranges = []
+    for idx in range(1, len(closes)):
+        high = highs[idx]
+        low = lows[idx]
+        prev_close = closes[idx - 1]
+        tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+        true_ranges.append(tr)
+
+    atr_value = sum(true_ranges[:period]) / float(period)
+    for tr in true_ranges[period:]:
+        atr_value = ((atr_value * (period - 1)) + tr) / float(period)
+    return atr_value
+
+
 def _map_timeframe(name):
     mapping = {
         "M1": mt5.TIMEFRAME_M1,
@@ -131,22 +156,25 @@ def _map_timeframe(name):
     return mapping[key]
 
 
-def _build_ai_prompt(symbol, timeframe_name, indicators, last_closes):
+def _build_ai_prompt(symbol, timeframe_name, indicators, last_closes, strategy_name):
     return (
-        "You are a conservative trading assistant for FBS/MT5.\n"
-        "Symbol: {0}\n"
-        "Timeframe: {1}\n"
-        "Indicators: ema_fast={2:.5f}, ema_slow={3:.5f}, rsi14={4:.2f}\n"
-        "Recent closes: {5}\n\n"
+        "You are a conservative scalping risk analyst for FBS/MT5.\n"
+        "Strategy: {0}\n"
+        "Symbol: {1}\n"
+        "Timeframe: {2}\n"
+        "Indicators: ema_fast={3:.5f}, ema_slow={4:.5f}, rsi={5:.2f}, atr14={6:.5f}\n"
+        "Recent closes: {7}\n\n"
         "Return strict JSON with keys only:\n"
         "{{\"action\":\"buy|sell|hold\",\"confidence\":0-1,\"reason\":\"short\"}}\n"
         "Do not add markdown."
     ).format(
+        strategy_name,
         symbol,
         timeframe_name,
         indicators["ema_fast"],
         indicators["ema_slow"],
-        indicators["rsi14"],
+        indicators["rsi"],
+        indicators["atr14"],
         ",".join("{0:.5f}".format(v) for v in last_closes),
     )
 
@@ -177,13 +205,30 @@ def _parse_ai_response(payload):
 def _base_signal(indicators):
     ema_fast = indicators["ema_fast"]
     ema_slow = indicators["ema_slow"]
-    rsi14 = indicators["rsi14"]
+    rsi_value = indicators["rsi"]
 
-    if ema_fast > ema_slow and 45.0 <= rsi14 <= 70.0:
+    if ema_fast > ema_slow and 45.0 <= rsi_value <= 70.0:
         return "buy", "EMA fast above EMA slow and RSI supports long."
-    if ema_fast < ema_slow and 30.0 <= rsi14 <= 55.0:
+    if ema_fast < ema_slow and 30.0 <= rsi_value <= 55.0:
         return "sell", "EMA fast below EMA slow and RSI supports short."
     return "hold", "Indicators are not aligned for a clear entry."
+
+
+def _scalp_signal(indicators):
+    ema_fast = indicators["ema_fast"]
+    ema_slow = indicators["ema_slow"]
+    rsi_value = indicators["rsi"]
+    last_close = indicators["last_close"]
+    prev_close = indicators["prev_close"]
+
+    long_setup = ema_fast > ema_slow and 55.0 <= rsi_value <= 80.0 and last_close > prev_close
+    short_setup = ema_fast < ema_slow and 20.0 <= rsi_value <= 45.0 and last_close < prev_close
+
+    if long_setup:
+        return "buy", "Scalp long: trend + momentum + immediate impulse."
+    if short_setup:
+        return "sell", "Scalp short: trend + momentum + immediate impulse."
+    return "hold", "Scalp filters are not aligned."
 
 
 def _normalize_action(value):
@@ -204,14 +249,14 @@ def ai_decision(ai_api_key, ai_model, user_prompt, ai_base_url):
         "messages": [
             {
                 "role": "system",
-                "content": "You are a conservative trading risk analyst.",
+                "content": "You are a conservative scalping risk analyst.",
             },
             {
                 "role": "user",
                 "content": user_prompt,
             },
         ],
-        "temperature": 0.7,
+        "temperature": 0.2,
     }
 
     try:
@@ -298,16 +343,54 @@ def _fetch_candles(symbol, timeframe, bars):
     if rates is None or len(rates) == 0:
         raise FbsAiError("No candle data returned for symbol/timeframe.")
 
-    closes = [float(row["close"]) for row in rates]
-    return closes
-
-
-def _build_indicators(closes):
     return {
-        "ema_fast": _ema(closes, 20),
-        "ema_slow": _ema(closes, 50),
-        "rsi14": _rsi(closes, 14),
+        "opens": [float(row["open"]) for row in rates],
+        "highs": [float(row["high"]) for row in rates],
+        "lows": [float(row["low"]) for row in rates],
+        "closes": [float(row["close"]) for row in rates],
     }
+
+
+def _build_indicators(market, ema_fast, ema_slow, rsi_period):
+    closes = market["closes"]
+    highs = market["highs"]
+    lows = market["lows"]
+    return {
+        "ema_fast": _ema(closes, ema_fast),
+        "ema_slow": _ema(closes, ema_slow),
+        "rsi": _rsi(closes, rsi_period),
+        "atr14": _atr(highs, lows, closes, 14),
+        "last_close": closes[-1],
+        "prev_close": closes[-2],
+    }
+
+
+def _spread_points(symbol):
+    tick = mt5.symbol_info_tick(symbol)
+    info = mt5.symbol_info(symbol)
+    if tick is None or info is None or info.point <= 0:
+        raise FbsAiError("Could not compute spread for symbol: {0}".format(symbol))
+    return (tick.ask - tick.bid) / info.point
+
+
+def _quick_sl_tp_points(indicators, symbol_info, sl_mult, tp_mult, min_rr):
+    if sl_mult <= 0 or tp_mult <= 0:
+        raise FbsAiError("ATR multipliers must be above zero.")
+    if min_rr <= 0:
+        raise FbsAiError("Minimum R:R must be above zero.")
+    if symbol_info.point <= 0:
+        raise FbsAiError("Symbol point is invalid for ATR conversion.")
+
+    atr_points = int(max(1, round(indicators["atr14"] / symbol_info.point)))
+    sl_points = int(max(1, round(atr_points * sl_mult)))
+    tp_points = int(max(1, round(atr_points * tp_mult)))
+
+    rr = float(tp_points) / float(sl_points)
+    if rr < min_rr:
+        tp_points = int(max(tp_points, round(sl_points * min_rr)))
+        rr = float(tp_points) / float(sl_points)
+
+    return sl_points, tp_points, rr
 
 
 def _build_order_request(symbol, side, volume, sl_points, tp_points, deviation):
@@ -372,8 +455,8 @@ def _print_banner():
     print("\n--------------------------------------------------")
     print(" AI Assistant for FBS Trading (MetaTrader 5)")
     print("--------------------------------------------------\n")
-    print("This module builds an indicator signal, optionally")
-    print("filters it with AI, and can place an MT5 order.\n")
+    print("Fast profile: quick entries/exits for scalping.")
+    print("It filters with spread control + optional AI.\n")
 
 
 def main():
@@ -392,9 +475,51 @@ def main():
     ).upper()
     bars = _to_int(_ask("Number of candles", os.getenv("FBS_BARS", str(DEFAULT_BARS))), "bars")
     risk_pct = _to_float(_ask("Risk percent per trade", os.getenv("FBS_RISK_PCT", "1.0")), "risk percent")
-    sl_points = _to_int(_ask("Stop loss points", os.getenv("FBS_SL_POINTS", "500")), "stop loss points")
-    tp_points = _to_int(_ask("Take profit points", os.getenv("FBS_TP_POINTS", "1000")), "take profit points")
     deviation = _to_int(_ask("Slippage/deviation", os.getenv("FBS_DEVIATION", "20")), "deviation")
+    max_spread_points = _to_float(
+        _ask("Max spread points", os.getenv("FBS_MAX_SPREAD_POINTS", str(DEFAULT_MAX_SPREAD_POINTS))),
+        "max spread points",
+    )
+
+    fast_profile = _ask("Fast scalp profile? (y/n)", os.getenv("FBS_FAST_PROFILE", "y")).lower() != "n"
+
+    ema_fast_period = _to_int(
+        _ask("EMA fast period", os.getenv("FBS_EMA_FAST", str(DEFAULT_SCALP_EMA_FAST))),
+        "ema fast period",
+    )
+    ema_slow_period = _to_int(
+        _ask("EMA slow period", os.getenv("FBS_EMA_SLOW", str(DEFAULT_SCALP_EMA_SLOW))),
+        "ema slow period",
+    )
+    rsi_period = _to_int(
+        _ask("RSI period", os.getenv("FBS_RSI_PERIOD", str(DEFAULT_SCALP_RSI_PERIOD))),
+        "rsi period",
+    )
+
+    sl_atr_mult = _to_float(
+        _ask("SL ATR multiplier", os.getenv("FBS_SL_ATR_MULT", str(DEFAULT_SL_ATR_MULT))),
+        "sl atr multiplier",
+    )
+    tp_atr_mult = _to_float(
+        _ask("TP ATR multiplier", os.getenv("FBS_TP_ATR_MULT", str(DEFAULT_TP_ATR_MULT))),
+        "tp atr multiplier",
+    )
+    min_rr = _to_float(
+        _ask("Minimum risk-reward", os.getenv("FBS_MIN_RR", str(DEFAULT_MIN_RR))),
+        "minimum risk-reward",
+    )
+
+    manual_sl_points = None
+    manual_tp_points = None
+    if not fast_profile:
+        manual_sl_points = _to_int(
+            _ask("Stop loss points", os.getenv("FBS_SL_POINTS", "500")),
+            "stop loss points",
+        )
+        manual_tp_points = _to_int(
+            _ask("Take profit points", os.getenv("FBS_TP_POINTS", "1000")),
+            "take profit points",
+        )
 
     login_text = _ask("MT5 login", os.getenv("FBS_MT5_LOGIN", ""))
     password = _ask_secret("MT5 password", os.getenv("FBS_MT5_PASSWORD"))
@@ -406,8 +531,32 @@ def main():
         print("\n[!] MT5 login, password and server are required.")
         input("\nPress <enter> to continue")
         return
-    if bars < 60:
-        print("\n[!] Number of candles must be at least 60.")
+    if bars < max(60, ema_slow_period + 10):
+        print("\n[!] Number of candles is too low for your indicator setup.")
+        input("\nPress <enter> to continue")
+        return
+    if ema_fast_period <= 0 or ema_slow_period <= 0 or ema_fast_period >= ema_slow_period:
+        print("\n[!] EMA fast must be > 0 and lower than EMA slow.")
+        input("\nPress <enter> to continue")
+        return
+    if rsi_period < 2:
+        print("\n[!] RSI period must be at least 2.")
+        input("\nPress <enter> to continue")
+        return
+    if risk_pct <= 0:
+        print("\n[!] Risk percent must be above zero.")
+        input("\nPress <enter> to continue")
+        return
+    if max_spread_points <= 0:
+        print("\n[!] Max spread points must be above zero.")
+        input("\nPress <enter> to continue")
+        return
+    if sl_atr_mult <= 0 or tp_atr_mult <= 0 or min_rr <= 0:
+        print("\n[!] ATR multipliers and minimum risk-reward must be above zero.")
+        input("\nPress <enter> to continue")
+        return
+    if not fast_profile and (manual_sl_points <= 0 or manual_tp_points <= 0):
+        print("\n[!] Stop loss and take profit points must be above zero.")
         input("\nPress <enter> to continue")
         return
 
@@ -452,15 +601,55 @@ def main():
         if not selected:
             raise FbsAiError("Could not select symbol: {0}".format(symbol))
 
-        closes = _fetch_candles(symbol, tf, bars)
-        indicators = _build_indicators(closes)
-        base_action, base_reason = _base_signal(indicators)
+        symbol_info = mt5.symbol_info(symbol)
+        if symbol_info is None:
+            raise FbsAiError("Could not load symbol info for {0}.".format(symbol))
+
+        market = _fetch_candles(symbol, tf, bars)
+        indicators = _build_indicators(
+            market=market,
+            ema_fast=ema_fast_period,
+            ema_slow=ema_slow_period,
+            rsi_period=rsi_period,
+        )
+        spread_now = _spread_points(symbol)
+
+        if fast_profile:
+            base_action, base_reason = _scalp_signal(indicators)
+            strategy_name = "fast_scalp"
+            sl_points, tp_points, rr = _quick_sl_tp_points(
+                indicators=indicators,
+                symbol_info=symbol_info,
+                sl_mult=sl_atr_mult,
+                tp_mult=tp_atr_mult,
+                min_rr=min_rr,
+            )
+        else:
+            base_action, base_reason = _base_signal(indicators)
+            strategy_name = "standard_signal"
+            sl_points = manual_sl_points
+            tp_points = manual_tp_points
+            rr = float(tp_points) / float(sl_points)
 
         print("\n[+] Indicator snapshot")
-        print("    EMA20: {0:.5f}".format(indicators["ema_fast"]))
-        print("    EMA50: {0:.5f}".format(indicators["ema_slow"]))
-        print("    RSI14: {0:.2f}".format(indicators["rsi14"]))
+        print("    EMA{0}: {1:.5f}".format(ema_fast_period, indicators["ema_fast"]))
+        print("    EMA{0}: {1:.5f}".format(ema_slow_period, indicators["ema_slow"]))
+        print("    RSI{0}: {1:.2f}".format(rsi_period, indicators["rsi"]))
+        print("    ATR14: {0:.5f}".format(indicators["atr14"]))
+        print("    Spread: {0:.2f} points".format(spread_now))
         print("\n[+] Base signal: {0} ({1})".format(base_action.upper(), base_reason))
+        print("[+] Exit profile: SL={0} points, TP={1} points, R:R={2:.2f}".format(
+            sl_points, tp_points, rr
+        ))
+
+        if spread_now > max_spread_points:
+            print(
+                "\n[*] Final decision: HOLD (Spread too high: {0:.2f} > {1:.2f})".format(
+                    spread_now, max_spread_points
+                )
+            )
+            input("\nPress <enter> to continue")
+            return
 
         final_action = base_action
         final_reason = base_reason
@@ -469,7 +658,13 @@ def main():
             if not ai_api_key:
                 raise FbsAiError("AI API key is required when AI layer is enabled.")
 
-            prompt = _build_ai_prompt(symbol, timeframe_name, indicators, closes[-20:])
+            prompt = _build_ai_prompt(
+                symbol=symbol,
+                timeframe_name=timeframe_name,
+                indicators=indicators,
+                last_closes=market["closes"][-20:],
+                strategy_name=strategy_name,
+            )
             decision = ai_decision(
                 ai_api_key=ai_api_key,
                 ai_model=ai_model,
@@ -497,8 +692,7 @@ def main():
             return
 
         account_info = mt5.account_info()
-        symbol_info = mt5.symbol_info(symbol)
-        if account_info is None or symbol_info is None:
+        if account_info is None:
             raise FbsAiError("Could not fetch account/symbol details for risk sizing.")
 
         volume = _calc_volume_by_risk(account_info, symbol_info, risk_pct, sl_points)
@@ -507,6 +701,7 @@ def main():
         print("    Risk %: {0}".format(risk_pct))
         print("    SL points: {0}".format(sl_points))
         print("    TP points: {0}".format(tp_points))
+        print("    Risk-Reward: {0:.2f}".format(rr))
         print("    Dry run: {0}".format("YES" if dry_run else "NO"))
 
         confirm = _ask("Place order now? (y/n)", "n").lower()
