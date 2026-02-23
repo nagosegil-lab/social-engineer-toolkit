@@ -1,44 +1,68 @@
-# AI + FBS Quickstart
+# AI + FBS Trading Quickstart
 
 This guide explains how to use the SET third-party module:
 
 - `modules/fbs_ai_assistant.py`
 
-The module does two things:
+The module is designed for **FBS broker trading via MetaTrader 5**.
+It does three steps:
 
-1. Generates a Facebook post with an AI model.
-2. Optionally publishes the generated post to a Facebook Page through Graph API.
+1. Pulls market candles from MT5.
+2. Builds a base signal (EMA20/EMA50 + RSI14).
+3. Optionally uses AI as a confirmation layer before placing an order.
 
-## 1) Required environment variables
+> Important: the default mode is **dry-run** so no real order is sent unless you confirm and disable dry-run.
 
-For AI generation:
+## 1) Requirements
 
-- `AI_API_KEY` - API key for your AI provider.
-- `AI_BASE_URL` - Optional, defaults to `https://api.openai.com/v1`.
-- `AI_MODEL` - Optional, defaults to `gpt-4o-mini`.
+Install MetaTrader 5 Python package:
 
-For publishing to Facebook (optional):
+```bash
+pip3 install MetaTrader5
+```
 
-- `FBS_PAGE_ID` - Facebook Page ID.
-- `FBS_ACCESS_TOKEN` - Facebook Page access token.
-- `FBS_GRAPH_VERSION` - Optional, defaults to `v21.0`.
+The module also uses:
 
-## 2) Run from SET
+- `requests` (already used in this repository)
+
+## 2) Optional environment variables
+
+### MT5 / FBS connection
+
+- `FBS_MT5_LOGIN`
+- `FBS_MT5_PASSWORD`
+- `FBS_MT5_SERVER`
+- `FBS_MT5_PATH` (optional terminal path)
+
+### Trading defaults
+
+- `FBS_SYMBOL` (default: `XAUUSD`)
+- `FBS_TIMEFRAME` (default: `M15`)
+- `FBS_BARS` (default: `250`)
+- `FBS_RISK_PCT` (default: `1.0`)
+- `FBS_SL_POINTS` (default: `500`)
+- `FBS_TP_POINTS` (default: `1000`)
+- `FBS_DEVIATION` (default: `20`)
+- `FBS_DRY_RUN` (default: `y`)
+- `FBS_AI_MIN_CONFIDENCE` (default: `0.65`)
+
+### AI layer (optional)
+
+- `AI_API_KEY`
+- `AI_BASE_URL` (default: `https://api.openai.com/v1`)
+- `AI_MODEL` (default: `gpt-4o-mini`)
+
+## 3) Run from SET
 
 1. Start SET.
 2. Go to `Third Party Modules`.
-3. Select `AI Assistant for FBS (Facebook Business Suite)`.
-4. Fill prompts:
-   - Business name
-   - Product/service
-   - Audience
-   - Tone
-   - Goal/CTA
-5. Review the generated post.
-6. Choose whether to publish now.
+3. Select `AI Assistant for FBS Trading (MetaTrader 5)`.
+4. Fill in your MT5 account details.
+5. Review indicator signal and AI confirmation.
+6. Confirm order only if you want to proceed.
 
-## 3) Notes
+## 4) Risk notice
 
-- The module does not store your API keys to disk.
-- If `AI_BASE_URL` points to an OpenAI-compatible endpoint, the module should work without code changes.
-- You are responsible for permissions and compliance for all APIs used.
+- This module is a helper, not guaranteed profit.
+- Always test in demo account first.
+- You are fully responsible for risk, broker rules, and legal compliance.

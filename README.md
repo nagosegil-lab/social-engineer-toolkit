@@ -60,8 +60,8 @@ python setup.py
 ## SET Tutorial
 For a full document on how to use SET, [visit the SET user manual](https://github.com/trustedsec/social-engineer-toolkit/raw/master/readme/User_Manual.pdf).
 
-## AI + FBS module (Third Party)
-An AI-assisted Facebook Business Suite module is available in:
+## AI + FBS Trading module (Third Party)
+An AI-assisted FBS trading module (MetaTrader 5) is available in:
 
 - `modules/fbs_ai_assistant.py`
 
