@@ -3,7 +3,9 @@ from __future__ import print_function
 
 import json
 import os
+import random
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import requests
 
@@ -43,6 +45,10 @@ DEFAULT_SESSION_MODE = "overlap"
 DEFAULT_SESSION_TIME_REFERENCE = "utc"
 DEFAULT_BROKER_UTC_OFFSET = 0.0
 DEFAULT_BLOCK_WEEKENDS = True
+DEFAULT_SIMULATION_MODE = False
+DEFAULT_SIM_SPREAD_POINTS = 20.0
+DEFAULT_SIM_BALANCE = 10000.0
+DEFAULT_SIM_START_PRICE = 2900.0
 
 SESSION_WINDOWS_UTC = {
     "london": (7, 16),
@@ -339,15 +345,26 @@ def _atr(highs, lows, closes, period=14):
 
 
 def _map_timeframe(name):
-    mapping = {
-        "M1": mt5.TIMEFRAME_M1,
-        "M5": mt5.TIMEFRAME_M5,
-        "M15": mt5.TIMEFRAME_M15,
-        "M30": mt5.TIMEFRAME_M30,
-        "H1": mt5.TIMEFRAME_H1,
-        "H4": mt5.TIMEFRAME_H4,
-        "D1": mt5.TIMEFRAME_D1,
-    }
+    if mt5 is None:
+        mapping = {
+            "M1": "M1",
+            "M5": "M5",
+            "M15": "M15",
+            "M30": "M30",
+            "H1": "H1",
+            "H4": "H4",
+            "D1": "D1",
+        }
+    else:
+        mapping = {
+            "M1": mt5.TIMEFRAME_M1,
+            "M5": mt5.TIMEFRAME_M5,
+            "M15": mt5.TIMEFRAME_M15,
+            "M30": mt5.TIMEFRAME_M30,
+            "H1": mt5.TIMEFRAME_H1,
+            "H4": mt5.TIMEFRAME_H4,
+            "D1": mt5.TIMEFRAME_D1,
+        }
     key = (name or "").upper().strip()
     if key not in mapping:
         raise FbsAiError("Unsupported timeframe: {0}".format(name))
@@ -591,6 +608,88 @@ def _quick_sl_tp_points(indicators, symbol_info, sl_mult, tp_mult, min_rr):
     return sl_points, tp_points, rr
 
 
+def _sim_symbol_info():
+    return SimpleNamespace(
+        point=0.01,
+        volume_min=0.01,
+        volume_max=50.0,
+        volume_step=0.01,
+        trade_tick_value=1.0,
+        trade_tick_size=0.01,
+    )
+
+
+def _sim_account_info(balance):
+    return SimpleNamespace(balance=balance)
+
+
+def _simulate_market(bars, start_price):
+    if bars < 20:
+        raise FbsAiError("Simulation requires at least 20 candles.")
+
+    rng = random.Random(240226)
+    closes = []
+    opens = []
+    highs = []
+    lows = []
+
+    price = float(start_price)
+    for idx in range(bars):
+        drift = 0.05 if idx % 60 < 40 else -0.02
+        noise = rng.uniform(-0.35, 0.35)
+        open_price = price
+        close_price = max(100.0, open_price + drift + noise)
+        wick = abs(rng.uniform(0.05, 0.4))
+        high_price = max(open_price, close_price) + wick
+        low_price = min(open_price, close_price) - wick
+
+        opens.append(open_price)
+        highs.append(high_price)
+        lows.append(low_price)
+        closes.append(close_price)
+        price = close_price
+
+    return {
+        "opens": opens,
+        "highs": highs,
+        "lows": lows,
+        "closes": closes,
+    }
+
+
+def _sim_spread_points():
+    return _to_float(
+        os.getenv("FBS_SIM_SPREAD_POINTS", str(DEFAULT_SIM_SPREAD_POINTS)),
+        "simulation spread points",
+    )
+
+
+def _build_sim_order_request(symbol, side, volume, sl_points, tp_points, deviation, symbol_info, market):
+    last_close = market["closes"][-1]
+    spread_points = _sim_spread_points()
+    ask = last_close + (spread_points * symbol_info.point / 2.0)
+    bid = last_close - (spread_points * symbol_info.point / 2.0)
+    if side == "buy":
+        price = ask
+        sl = price - (sl_points * symbol_info.point)
+        tp = price + (tp_points * symbol_info.point)
+    else:
+        price = bid
+        sl = price + (sl_points * symbol_info.point)
+        tp = price - (tp_points * symbol_info.point)
+    return {
+        "action": "SIMULATED_DEAL",
+        "symbol": symbol,
+        "side": side,
+        "volume": volume,
+        "price": price,
+        "sl": sl,
+        "tp": tp,
+        "deviation": deviation,
+        "note": "simulation_mode_no_live_order",
+    }
+
+
 def _build_order_request(symbol, side, volume, sl_points, tp_points, deviation):
     tick = mt5.symbol_info_tick(symbol)
     symbol_info = mt5.symbol_info(symbol)
@@ -660,11 +759,14 @@ def _print_banner():
 def main():
     _print_banner()
 
+    simulation_mode = _to_bool(
+        os.getenv("FBS_SIMULATION_MODE", "y" if DEFAULT_SIMULATION_MODE else "n"),
+        default=DEFAULT_SIMULATION_MODE,
+    )
     if mt5 is None:
-        print("[!] MetaTrader5 module is missing.")
-        print("[!] Install with: pip3 install MetaTrader5")
-        input("\nPress <enter> to continue")
-        return
+        print("[!] MetaTrader5 package is unavailable in this environment.")
+        print("[*] Switching to simulation mode so you can validate full flow.")
+        simulation_mode = True
 
     preset_name = _ask(
         "Preset (xau_scalp_aggressive/xau_scalp_balanced/custom)",
@@ -678,6 +780,15 @@ def main():
         return
 
     print("\n[*] Active preset: {0}".format(preset_key))
+    if mt5 is not None:
+        simulation_mode = _to_bool(
+            _ask("Simulation mode only? (y/n)", "y" if simulation_mode else "n"),
+            default=simulation_mode,
+        )
+    if simulation_mode:
+        print("[*] Running in SIMULATION mode (no live broker orders).")
+    else:
+        print("[*] Running in LIVE mode (MT5 connection required).")
 
     symbol = _ask(
         "Symbol",
@@ -821,19 +932,43 @@ def main():
             "take profit points",
         )
 
-    login_text = _ask("MT5 login", os.getenv("FBS_MT5_LOGIN", ""))
-    password = _ask_secret("MT5 password", os.getenv("FBS_MT5_PASSWORD"))
-    server = _ask("MT5 server", os.getenv("FBS_MT5_SERVER", ""))
-    mt5_path = _ask("MT5 terminal path (optional)", os.getenv("FBS_MT5_PATH", ""))
-    dry_run = _to_bool(
-        _ask("Dry run only? (y/n)", os.getenv("FBS_DRY_RUN", "y")),
-        default=True,
+    login_text = ""
+    password = ""
+    server = ""
+    mt5_path = ""
+    sim_balance = _to_float(
+        os.getenv("FBS_SIM_BALANCE", str(DEFAULT_SIM_BALANCE)),
+        "simulation balance",
+    )
+    sim_start_price = _to_float(
+        os.getenv("FBS_SIM_START_PRICE", str(DEFAULT_SIM_START_PRICE)),
+        "simulation start price",
     )
 
-    if not login_text or not password or not server:
-        print("\n[!] MT5 login, password and server are required.")
-        input("\nPress <enter> to continue")
-        return
+    if simulation_mode:
+        sim_balance = _to_float(
+            _ask("Simulation balance", str(sim_balance)),
+            "simulation balance",
+        )
+        sim_start_price = _to_float(
+            _ask("Simulation start price", str(sim_start_price)),
+            "simulation start price",
+        )
+        dry_run = True
+    else:
+        login_text = _ask("MT5 login", os.getenv("FBS_MT5_LOGIN", ""))
+        password = _ask_secret("MT5 password", os.getenv("FBS_MT5_PASSWORD"))
+        server = _ask("MT5 server", os.getenv("FBS_MT5_SERVER", ""))
+        mt5_path = _ask("MT5 terminal path (optional)", os.getenv("FBS_MT5_PATH", ""))
+        dry_run = _to_bool(
+            _ask("Dry run only? (y/n)", os.getenv("FBS_DRY_RUN", "y")),
+            default=True,
+        )
+
+        if not login_text or not password or not server:
+            print("\n[!] MT5 login, password and server are required.")
+            input("\nPress <enter> to continue")
+            return
     if bars < max(60, ema_slow_period + 10):
         print("\n[!] Number of candles is too low for your indicator setup.")
         input("\nPress <enter> to continue")
@@ -858,12 +993,17 @@ def main():
         print("\n[!] ATR multipliers and minimum risk-reward must be above zero.")
         input("\nPress <enter> to continue")
         return
+    if simulation_mode and (sim_balance <= 0 or sim_start_price <= 0):
+        print("\n[!] Simulation balance/start price must be above zero.")
+        input("\nPress <enter> to continue")
+        return
     if not fast_profile and (manual_sl_points <= 0 or manual_tp_points <= 0):
         print("\n[!] Stop loss and take profit points must be above zero.")
         input("\nPress <enter> to continue")
         return
 
-    use_ai = _to_bool(_ask("Use AI confirmation layer? (y/n)", "y"), default=True)
+    use_ai_default = "n" if simulation_mode else "y"
+    use_ai = _to_bool(_ask("Use AI confirmation layer? (y/n)", use_ai_default), default=not simulation_mode)
     ai_api_key = ""
     ai_model = DEFAULT_AI_MODEL
     ai_base_url = DEFAULT_AI_BASE_URL
@@ -885,40 +1025,50 @@ def main():
             input("\nPress <enter> to continue")
             return
 
-    try:
-        login = int(login_text)
-    except ValueError:
-        print("\n[!] MT5 login must be numeric.")
-        input("\nPress <enter> to continue")
-        return
+    login = None
+    if not simulation_mode:
+        try:
+            login = int(login_text)
+        except ValueError:
+            print("\n[!] MT5 login must be numeric.")
+            input("\nPress <enter> to continue")
+            return
 
     try:
         tf = _map_timeframe(timeframe_name)
+        account_info = None
 
-        if mt5_path.strip():
-            ok = mt5.initialize(path=mt5_path.strip(), login=login, password=password, server=server)
+        if simulation_mode:
+            symbol_info = _sim_symbol_info()
+            account_info = _sim_account_info(sim_balance)
+            market = _simulate_market(bars=bars, start_price=sim_start_price)
+            spread_now = _sim_spread_points()
         else:
-            ok = mt5.initialize(login=login, password=password, server=server)
+            if mt5_path.strip():
+                ok = mt5.initialize(path=mt5_path.strip(), login=login, password=password, server=server)
+            else:
+                ok = mt5.initialize(login=login, password=password, server=server)
 
-        if not ok:
-            raise FbsAiError("MT5 initialize failed: {0}".format(mt5.last_error()))
+            if not ok:
+                raise FbsAiError("MT5 initialize failed: {0}".format(mt5.last_error()))
 
-        selected = mt5.symbol_select(symbol, True)
-        if not selected:
-            raise FbsAiError("Could not select symbol: {0}".format(symbol))
+            selected = mt5.symbol_select(symbol, True)
+            if not selected:
+                raise FbsAiError("Could not select symbol: {0}".format(symbol))
 
-        symbol_info = mt5.symbol_info(symbol)
-        if symbol_info is None:
-            raise FbsAiError("Could not load symbol info for {0}.".format(symbol))
+            symbol_info = mt5.symbol_info(symbol)
+            if symbol_info is None:
+                raise FbsAiError("Could not load symbol info for {0}.".format(symbol))
 
-        market = _fetch_candles(symbol, tf, bars)
+            market = _fetch_candles(symbol, tf, bars)
+            spread_now = _spread_points(symbol)
+
         indicators = _build_indicators(
             market=market,
             ema_fast=ema_fast_period,
             ema_slow=ema_slow_period,
             rsi_period=rsi_period,
         )
-        spread_now = _spread_points(symbol)
 
         if fast_profile:
             base_action, base_reason = _scalp_signal(indicators)
@@ -943,6 +1093,7 @@ def main():
         print("    RSI{0}: {1:.2f}".format(rsi_period, indicators["rsi"]))
         print("    ATR14: {0:.5f}".format(indicators["atr14"]))
         print("    Spread: {0:.2f} points".format(spread_now))
+        print("    Execution mode: {0}".format("SIMULATION" if simulation_mode else "LIVE"))
         print("    Session mode: {0}".format(session_mode))
         print("    Session clock: {0}".format(session_time_reference))
         print("    Weekend block: {0}".format("ON" if block_weekends else "OFF"))
@@ -1013,9 +1164,10 @@ def main():
             input("\nPress <enter> to continue")
             return
 
-        account_info = mt5.account_info()
+        if not simulation_mode:
+            account_info = mt5.account_info()
         if account_info is None:
-            raise FbsAiError("Could not fetch account/symbol details for risk sizing.")
+            raise FbsAiError("Could not fetch account details for risk sizing.")
 
         volume = _calc_volume_by_risk(account_info, symbol_info, risk_pct, sl_points)
         print("\n[+] Final decision: {0}".format(final_action.upper()))
@@ -1032,17 +1184,32 @@ def main():
             input("\nPress <enter> to continue")
             return
 
-        result = _place_trade(
-            symbol=symbol,
-            side=final_action,
-            volume=volume,
-            sl_points=sl_points,
-            tp_points=tp_points,
-            deviation=deviation,
-            dry_run=dry_run,
-        )
+        if simulation_mode:
+            result = {
+                "dry_run": True,
+                "request": _build_sim_order_request(
+                    symbol=symbol,
+                    side=final_action,
+                    volume=volume,
+                    sl_points=sl_points,
+                    tp_points=tp_points,
+                    deviation=deviation,
+                    symbol_info=symbol_info,
+                    market=market,
+                ),
+            }
+        else:
+            result = _place_trade(
+                symbol=symbol,
+                side=final_action,
+                volume=volume,
+                sl_points=sl_points,
+                tp_points=tp_points,
+                deviation=deviation,
+                dry_run=dry_run,
+            )
 
-        if dry_run:
+        if simulation_mode or dry_run:
             print("\n[+] Dry-run request preview:")
             print(result["request"])
         else:
@@ -1056,9 +1223,10 @@ def main():
         input("\nPress <enter> to continue")
         return
     finally:
-        try:
-            mt5.shutdown()
-        except Exception:
-            pass
+        if (not simulation_mode) and mt5 is not None:
+            try:
+                mt5.shutdown()
+            except Exception:
+                pass
 
     input("\nPress <enter> to continue")

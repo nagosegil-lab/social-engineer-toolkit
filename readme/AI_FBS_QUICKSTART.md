@@ -21,6 +21,8 @@ Install MetaTrader 5 Python package:
 pip3 install MetaTrader5
 ```
 
+If MetaTrader5 is unavailable on your OS/environment, use built-in simulation mode (see below).
+
 The module also uses:
 
 - `requests` (already used in this repository)
@@ -47,6 +49,10 @@ The module also uses:
 - `FBS_SESSION_TIME_REFERENCE` (default: `utc`) - `utc` or `broker`
 - `FBS_BROKER_UTC_OFFSET` (default: `0.0`) - used when reference is `broker`
 - `FBS_BLOCK_WEEKENDS` (default: `y`)
+- `FBS_SIMULATION_MODE` (default: `n`; auto-`y` if MetaTrader5 package is missing)
+- `FBS_SIM_BALANCE` (default: `10000`)
+- `FBS_SIM_START_PRICE` (default: `2900`)
+- `FBS_SIM_SPREAD_POINTS` (default: `20`)
 - `FBS_FAST_PROFILE` (default: `y`)
 - `FBS_EMA_FAST` (default: `9`)
 - `FBS_EMA_SLOW` (default: `21`)
@@ -77,6 +83,20 @@ Manual fallback (if `FBS_FAST_PROFILE=n`):
 5. Keep `Fast scalp profile` enabled for quick entries/exits.
 6. Review spread filter, SL/TP from ATR, and AI confirmation.
 7. Confirm order only if you want to proceed.
+
+### Simulation mode (recommended for first run)
+
+Use when you want to validate full flow without broker connection:
+
+```bash
+export FBS_SIMULATION_MODE=y
+```
+
+In simulation mode:
+
+- No MT5 login is required.
+- No live order is sent.
+- You still get full signal/session/risk flow and a dry-run order preview.
 
 ## 4) Presets
 
