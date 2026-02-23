@@ -44,6 +44,9 @@ The module also uses:
 - `FBS_DEVIATION` (default: `20`)
 - `FBS_MAX_SPREAD_POINTS` (default: `45`)
 - `FBS_SESSION_MODE` (default: `overlap`)
+- `FBS_SESSION_TIME_REFERENCE` (default: `utc`) - `utc` or `broker`
+- `FBS_BROKER_UTC_OFFSET` (default: `0.0`) - used when reference is `broker`
+- `FBS_BLOCK_WEEKENDS` (default: `y`)
 - `FBS_FAST_PROFILE` (default: `y`)
 - `FBS_EMA_FAST` (default: `9`)
 - `FBS_EMA_SLOW` (default: `21`)
@@ -90,6 +93,15 @@ Session filter modes:
 - `london` (UTC 07:00-16:00)
 - `newyork` (UTC 12:00-21:00)
 - `london_newyork` (London OR New York session)
+
+Session clock modes:
+
+- `utc`: evaluates sessions against UTC clock.
+- `broker`: evaluates sessions using `UTC + FBS_BROKER_UTC_OFFSET`.
+
+Weekend rule:
+
+- If `FBS_BLOCK_WEEKENDS=y`, all entries are blocked on Saturday/Sunday based on selected session clock.
 
 Aggressive preset baseline:
 

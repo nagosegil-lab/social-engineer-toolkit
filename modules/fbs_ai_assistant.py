@@ -3,7 +3,7 @@ from __future__ import print_function
 
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import requests
 
@@ -40,6 +40,9 @@ DEFAULT_SCALP_EMA_SLOW = 21
 DEFAULT_SCALP_RSI_PERIOD = 7
 DEFAULT_PROFILE_PRESET = "xau_scalp_aggressive"
 DEFAULT_SESSION_MODE = "overlap"
+DEFAULT_SESSION_TIME_REFERENCE = "utc"
+DEFAULT_BROKER_UTC_OFFSET = 0.0
+DEFAULT_BLOCK_WEEKENDS = True
 
 SESSION_WINDOWS_UTC = {
     "london": (7, 16),
@@ -62,6 +65,14 @@ SESSION_ALIASES = {
     "london_or_newyork": "london_newyork",
 }
 
+SESSION_TIME_REFERENCE_ALIASES = {
+    "utc": "utc",
+    "zulu": "utc",
+    "server": "broker",
+    "broker": "broker",
+    "broker_server": "broker",
+}
+
 PROFILE_PRESETS = {
     "xau_scalp_aggressive": {
         "symbol": "XAUUSD",
@@ -79,6 +90,9 @@ PROFILE_PRESETS = {
         "min_rr": 2.0,
         "ai_min_confidence": 0.72,
         "session_mode": "overlap",
+        "session_time_reference": "utc",
+        "broker_utc_offset": 0.0,
+        "block_weekends": True,
     },
     "xau_scalp_balanced": {
         "symbol": "XAUUSD",
@@ -96,6 +110,9 @@ PROFILE_PRESETS = {
         "min_rr": 1.5,
         "ai_min_confidence": 0.65,
         "session_mode": "london_newyork",
+        "session_time_reference": "utc",
+        "broker_utc_offset": 0.0,
+        "block_weekends": True,
     },
 }
 
@@ -186,20 +203,50 @@ def _normalize_session_mode(mode):
     return SESSION_ALIASES[key]
 
 
+def _normalize_session_time_reference(value):
+    key = str(value or "").strip().lower()
+    if key not in SESSION_TIME_REFERENCE_ALIASES:
+        raise FbsAiError(
+            "Invalid session time reference '{0}'. Use: utc or broker.".format(value)
+        )
+    return SESSION_TIME_REFERENCE_ALIASES[key]
+
+
 def _is_hour_in_window(hour, start_hour, end_hour):
     if start_hour <= end_hour:
         return start_hour <= hour < end_hour
     return hour >= start_hour or hour < end_hour
 
 
-def _session_gate(mode, now_utc=None):
+def _reference_now(reference_mode, broker_utc_offset):
+    now_utc = datetime.utcnow()
+    normalized = _normalize_session_time_reference(reference_mode)
+    if normalized == "utc":
+        return now_utc, "UTC"
+
+    broker_now = now_utc + timedelta(hours=broker_utc_offset)
+    label = "BROKER(UTC{0:+.2f})".format(broker_utc_offset)
+    return broker_now, label
+
+
+def _session_gate(mode, now_reference=None, block_weekends=True, clock_label="UTC"):
     normalized = _normalize_session_mode(mode)
     if normalized == "off":
-        return True, "Session filter OFF."
+        return True, "Session filter OFF ({0}).".format(clock_label)
 
-    now_utc = now_utc or datetime.utcnow()
-    hour = now_utc.hour
-    minute = now_utc.minute
+    now_reference = now_reference or datetime.utcnow()
+    hour = now_reference.hour
+    minute = now_reference.minute
+
+    if block_weekends and now_reference.weekday() >= 5:
+        return (
+            False,
+            "Session gate blocked weekend at {0:02d}:{1:02d} ({2})".format(
+                hour,
+                minute,
+                clock_label,
+            ),
+        )
 
     if normalized == "london_newyork":
         in_london = _is_hour_in_window(hour, *SESSION_WINDOWS_UTC["london"])
@@ -207,10 +254,11 @@ def _session_gate(mode, now_utc=None):
         allowed = in_london or in_newyork
         return (
             allowed,
-            "Session gate {0} at {1:02d}:{2:02d} UTC".format(
+            "Session gate {0} at {1:02d}:{2:02d} ({3})".format(
                 normalized,
                 hour,
                 minute,
+                clock_label,
             ),
         )
 
@@ -218,12 +266,13 @@ def _session_gate(mode, now_utc=None):
     allowed = _is_hour_in_window(hour, start_hour, end_hour)
     return (
         allowed,
-        "Session gate {0} ({1:02d}-{2:02d} UTC) at {3:02d}:{4:02d} UTC".format(
+        "Session gate {0} ({1:02d}-{2:02d}) at {3:02d}:{4:02d} ({5})".format(
             normalized,
             start_hour,
             end_hour,
             hour,
             minute,
+            clock_label,
         ),
     )
 
@@ -667,6 +716,48 @@ def main():
         print("\n[!] {0}".format(exc))
         input("\nPress <enter> to continue")
         return
+    session_time_reference = _ask(
+        "Session time reference (utc/broker)",
+        str(
+            _pick_value(
+                "FBS_SESSION_TIME_REFERENCE",
+                preset,
+                "session_time_reference",
+                DEFAULT_SESSION_TIME_REFERENCE,
+            )
+        ),
+    )
+    try:
+        session_time_reference = _normalize_session_time_reference(session_time_reference)
+    except FbsAiError as exc:
+        print("\n[!] {0}".format(exc))
+        input("\nPress <enter> to continue")
+        return
+    broker_utc_offset = DEFAULT_BROKER_UTC_OFFSET
+    if session_time_reference == "broker":
+        broker_utc_offset = _to_float(
+            _ask(
+                "Broker UTC offset (e.g. 2 or 3)",
+                str(_pick_value("FBS_BROKER_UTC_OFFSET", preset, "broker_utc_offset", DEFAULT_BROKER_UTC_OFFSET)),
+            ),
+            "broker utc offset",
+        )
+        if broker_utc_offset < -14 or broker_utc_offset > 14:
+            print("\n[!] Broker UTC offset seems invalid. Use range -14..14.")
+            input("\nPress <enter> to continue")
+            return
+    block_weekends = _to_bool(
+        _ask(
+            "Block weekends? (y/n)",
+            "y"
+            if _to_bool(
+                _pick_value("FBS_BLOCK_WEEKENDS", preset, "block_weekends", DEFAULT_BLOCK_WEEKENDS),
+                default=DEFAULT_BLOCK_WEEKENDS,
+            )
+            else "n",
+        ),
+        default=DEFAULT_BLOCK_WEEKENDS,
+    )
 
     fast_default = _to_bool(_pick_value("FBS_FAST_PROFILE", preset, "fast_profile", True), default=True)
     fast_profile = _to_bool(
@@ -853,6 +944,8 @@ def main():
         print("    ATR14: {0:.5f}".format(indicators["atr14"]))
         print("    Spread: {0:.2f} points".format(spread_now))
         print("    Session mode: {0}".format(session_mode))
+        print("    Session clock: {0}".format(session_time_reference))
+        print("    Weekend block: {0}".format("ON" if block_weekends else "OFF"))
         print("\n[+] Base signal: {0} ({1})".format(base_action.upper(), base_reason))
         print("[+] Exit profile: SL={0} points, TP={1} points, R:R={2:.2f}".format(
             sl_points, tp_points, rr
@@ -867,7 +960,13 @@ def main():
             input("\nPress <enter> to continue")
             return
 
-        session_allowed, session_msg = _session_gate(session_mode)
+        session_now, session_clock_label = _reference_now(session_time_reference, broker_utc_offset)
+        session_allowed, session_msg = _session_gate(
+            mode=session_mode,
+            now_reference=session_now,
+            block_weekends=block_weekends,
+            clock_label=session_clock_label,
+        )
         print("[+] {0}".format(session_msg))
         if not session_allowed:
             print("\n[*] Final decision: HOLD (Outside selected trading session).")
