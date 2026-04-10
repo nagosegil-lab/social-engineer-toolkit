@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import argparse
 import csv
+import itertools
 import math
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
 
 DEFAULT_IGNORE_COLUMN_KEYWORDS = (
@@ -40,6 +41,17 @@ class ScoredValue:
     score: float
     frequency: int
     frequency_ratio: float
+    recency_score: float
+    trend_ratio: float
+    last_seen_draw: int
+    draws_since_last_seen: int
+
+
+@dataclass(frozen=True)
+class ScoredCombination:
+    values: str
+    score: float
+    frequency: int
     recency_score: float
     trend_ratio: float
     last_seen_draw: int
@@ -245,8 +257,93 @@ def score_values(
     return scored
 
 
-def write_scores_csv(path: Path, scored_values: Iterable[ScoredValue]) -> None:
-    items = list(scored_values)
+def score_combinations(
+    draws: Sequence[Sequence[str]],
+    combo_size: int,
+    weights: Sequence[float] = (0.6, 0.25, 0.15),
+    recent_window: str = "0.3",
+    min_frequency: int = 1,
+) -> List[ScoredCombination]:
+    if not draws:
+        return []
+    if combo_size < 2:
+        raise ValueError("combo_size must be >= 2.")
+
+    freq_weight, recency_weight, trend_weight = normalize_weights(weights)
+    total_draws = len(draws)
+    recent_draw_count = _resolve_recent_window(recent_window, total_draws)
+    recent_start_index = total_draws - recent_draw_count
+
+    frequency: Dict[Tuple[str, ...], int] = {}
+    last_seen: Dict[Tuple[str, ...], int] = {}
+    recent_frequency: Dict[Tuple[str, ...], int] = {}
+
+    for draw_idx, draw_values in enumerate(draws):
+        distinct_values = sorted(set(draw_values))
+        if len(distinct_values) < combo_size:
+            continue
+        combos = itertools.combinations(distinct_values, combo_size)
+        for combo in combos:
+            frequency[combo] = frequency.get(combo, 0) + 1
+            last_seen[combo] = draw_idx
+            if draw_idx >= recent_start_index:
+                recent_frequency[combo] = recent_frequency.get(combo, 0) + 1
+
+    frequency = {value: count for value, count in frequency.items() if count >= min_frequency}
+    if not frequency:
+        return []
+
+    old_draw_count = max(1, total_draws - recent_draw_count)
+    max_frequency = max(frequency.values())
+
+    trend_raw: Dict[Tuple[str, ...], float] = {}
+    for value, count in frequency.items():
+        recent_count = recent_frequency.get(value, 0)
+        old_count = count - recent_count
+
+        recent_rate = recent_count / recent_draw_count
+        old_rate = old_count / old_draw_count
+        if old_rate == 0:
+            trend_raw[value] = 2.0 if recent_rate > 0 else 1.0
+        else:
+            trend_raw[value] = recent_rate / old_rate
+
+    trend_values = list(trend_raw.values())
+    min_trend = min(trend_values)
+    max_trend = max(trend_values)
+    trend_span = max(max_trend - min_trend, 1e-9)
+
+    scored: List[ScoredCombination] = []
+    for combo, count in frequency.items():
+        freq_norm = count / max_frequency
+        age = (total_draws - 1) - last_seen[combo]
+        recency = 1.0 if total_draws == 1 else 1 - (age / (total_draws - 1))
+        trend_norm = (trend_raw[combo] - min_trend) / trend_span
+
+        score = (
+            freq_weight * freq_norm
+            + recency_weight * recency
+            + trend_weight * trend_norm
+        )
+
+        scored.append(
+            ScoredCombination(
+                values="|".join(combo),
+                score=round(score, 6),
+                frequency=count,
+                recency_score=round(recency, 6),
+                trend_ratio=round(trend_raw[combo], 6),
+                last_seen_draw=last_seen[combo],
+                draws_since_last_seen=age,
+            )
+        )
+
+    scored.sort(key=lambda row: (row.score, row.frequency, -row.draws_since_last_seen), reverse=True)
+    return scored
+
+
+def write_dataclass_rows_csv(path: Path, rows: Iterable[Any]) -> None:
+    items = list(rows)
     if not items:
         return
 
@@ -299,6 +396,23 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional output path to save full scored table as CSV.",
     )
+    parser.add_argument(
+        "--combo-size",
+        type=int,
+        default=0,
+        help="If >=2, also score combinations of this size (e.g. 2, 3, 4).",
+    )
+    parser.add_argument(
+        "--top-combos",
+        type=int,
+        default=10,
+        help="How many top combinations to print when --combo-size is enabled.",
+    )
+    parser.add_argument(
+        "--combos-output-csv",
+        default=None,
+        help="Optional output path to save full combinations table as CSV.",
+    )
     return parser
 
 
@@ -332,9 +446,33 @@ def main() -> int:
             f"{row.recency_score:.6f}\t{row.trend_ratio:.6f}"
         )
 
+    combo_size = args.combo_size
+    if combo_size >= 2:
+        combo_scored = score_combinations(
+            draws=draws,
+            combo_size=combo_size,
+            weights=args.weights,
+            recent_window=args.recent_window,
+            min_frequency=args.min_frequency,
+        )
+        print()
+        print(f"Top combinations (size={combo_size}):")
+        print("values\tscore\tfrequency\trecency\ttrend_ratio")
+        for row in combo_scored[: args.top_combos]:
+            print(
+                f"{row.values}\t{row.score:.6f}\t{row.frequency}\t"
+                f"{row.recency_score:.6f}\t{row.trend_ratio:.6f}"
+            )
+        if args.combos_output_csv and combo_scored:
+            combos_path = Path(args.combos_output_csv)
+            write_dataclass_rows_csv(combos_path, combo_scored)
+            print(f"\nSaved full combinations table to: {combos_path}")
+        elif args.combos_output_csv:
+            print("\nNo combinations to save after filtering.")
+
     if args.output_csv:
         out_path = Path(args.output_csv)
-        write_scores_csv(out_path, scored)
+        write_dataclass_rows_csv(out_path, scored)
         print(f"\nSaved full score table to: {out_path}")
 
     return 0

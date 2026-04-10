@@ -71,3 +71,35 @@ python3 tools/historical_number_scorer.py \
   --output-csv /path/to/scored.csv
 ```
 
+## המלצת קומבינציות (זוגות/שלשות/רביעיות)
+
+אפשר להפעיל גם דירוג לקומבינציות ולא רק לערכים בודדים:
+
+```bash
+python3 tools/historical_number_scorer.py \
+  --input /path/to/history.csv \
+  --exclude-columns datetime draw_id \
+  --combo-size 4 \
+  --top-combos 15 \
+  --combos-output-csv /path/to/combos_scored.csv
+```
+
+- `--combo-size 2` עבור זוגות
+- `--combo-size 3` עבור שלשות
+- `--combo-size 4` עבור רביעיות
+
+## ממשק גרפי (GUI)
+
+לשימוש נוח ללא פקודות:
+
+```bash
+python3 tools/historical_number_scorer_gui.py
+```
+
+בחלון:
+1. בוחרים קובץ CSV
+2. מגדירים עמודות/Exclude (אם צריך)
+3. מגדירים משקלים וחלון recent
+4. (אופציונלי) מגדירים `Combination size`
+5. לוחצים `Run analysis`
+
