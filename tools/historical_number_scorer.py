@@ -58,6 +58,17 @@ class ScoredCombination:
     draws_since_last_seen: int
 
 
+@dataclass(frozen=True)
+class ScoredOrderedLine:
+    values: str
+    score: float
+    frequency: int
+    recency_score: float
+    trend_ratio: float
+    last_seen_draw: int
+    draws_since_last_seen: int
+
+
 def _normalize_token(raw: str) -> str:
     return raw.strip().upper()
 
@@ -342,6 +353,87 @@ def score_combinations(
     return scored
 
 
+def score_ordered_lines(
+    draws: Sequence[Sequence[str]],
+    weights: Sequence[float] = (0.6, 0.25, 0.15),
+    recent_window: str = "0.3",
+    min_frequency: int = 1,
+) -> List[ScoredOrderedLine]:
+    """Score exact ordered lines (position-aware)."""
+    if not draws:
+        return []
+
+    freq_weight, recency_weight, trend_weight = normalize_weights(weights)
+    total_draws = len(draws)
+    recent_draw_count = _resolve_recent_window(recent_window, total_draws)
+    recent_start_index = total_draws - recent_draw_count
+
+    frequency: Dict[Tuple[str, ...], int] = {}
+    last_seen: Dict[Tuple[str, ...], int] = {}
+    recent_frequency: Dict[Tuple[str, ...], int] = {}
+
+    for draw_idx, draw_values in enumerate(draws):
+        if not draw_values:
+            continue
+        pattern = tuple(draw_values)
+        frequency[pattern] = frequency.get(pattern, 0) + 1
+        last_seen[pattern] = draw_idx
+        if draw_idx >= recent_start_index:
+            recent_frequency[pattern] = recent_frequency.get(pattern, 0) + 1
+
+    frequency = {value: count for value, count in frequency.items() if count >= min_frequency}
+    if not frequency:
+        return []
+
+    old_draw_count = max(1, total_draws - recent_draw_count)
+    max_frequency = max(frequency.values())
+
+    trend_raw: Dict[Tuple[str, ...], float] = {}
+    for value, count in frequency.items():
+        recent_count = recent_frequency.get(value, 0)
+        old_count = count - recent_count
+
+        recent_rate = recent_count / recent_draw_count
+        old_rate = old_count / old_draw_count
+        if old_rate == 0:
+            trend_raw[value] = 2.0 if recent_rate > 0 else 1.0
+        else:
+            trend_raw[value] = recent_rate / old_rate
+
+    trend_values = list(trend_raw.values())
+    min_trend = min(trend_values)
+    max_trend = max(trend_values)
+    trend_span = max(max_trend - min_trend, 1e-9)
+
+    scored: List[ScoredOrderedLine] = []
+    for pattern, count in frequency.items():
+        freq_norm = count / max_frequency
+        age = (total_draws - 1) - last_seen[pattern]
+        recency = 1.0 if total_draws == 1 else 1 - (age / (total_draws - 1))
+        trend_norm = (trend_raw[pattern] - min_trend) / trend_span
+
+        score = (
+            freq_weight * freq_norm
+            + recency_weight * recency
+            + trend_weight * trend_norm
+        )
+
+        scored.append(
+            ScoredOrderedLine(
+                values="|".join(pattern),
+                score=round(score, 6),
+                frequency=count,
+                recency_score=round(recency, 6),
+                trend_ratio=round(trend_raw[pattern], 6),
+                last_seen_draw=last_seen[pattern],
+                draws_since_last_seen=age,
+            )
+        )
+
+    scored.sort(key=lambda row: (row.score, row.frequency, -row.draws_since_last_seen), reverse=True)
+    return scored
+
+
 def write_dataclass_rows_csv(path: Path, rows: Iterable[Any]) -> None:
     items = list(rows)
     if not items:
@@ -413,6 +505,28 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional output path to save full combinations table as CSV.",
     )
+    parser.add_argument(
+        "--ordered-lines",
+        action="store_true",
+        help="If set, score exact ordered lines (position-aware) from history.",
+    )
+    parser.add_argument(
+        "--top-ordered",
+        type=int,
+        default=10,
+        help="How many top ordered lines to print when --ordered-lines is enabled.",
+    )
+    parser.add_argument(
+        "--min-ordered-frequency",
+        type=int,
+        default=1,
+        help="Filter ordered lines that appeared fewer than this number of times.",
+    )
+    parser.add_argument(
+        "--ordered-output-csv",
+        default=None,
+        help="Optional output path to save full ordered-lines table as CSV.",
+    )
     return parser
 
 
@@ -469,6 +583,28 @@ def main() -> int:
             print(f"\nSaved full combinations table to: {combos_path}")
         elif args.combos_output_csv:
             print("\nNo combinations to save after filtering.")
+
+    if args.ordered_lines:
+        ordered_scored = score_ordered_lines(
+            draws=draws,
+            weights=args.weights,
+            recent_window=args.recent_window,
+            min_frequency=args.min_ordered_frequency,
+        )
+        print()
+        print("Top ordered lines (position-aware):")
+        print("values\tscore\tfrequency\trecency\ttrend_ratio")
+        for row in ordered_scored[: args.top_ordered]:
+            print(
+                f"{row.values}\t{row.score:.6f}\t{row.frequency}\t"
+                f"{row.recency_score:.6f}\t{row.trend_ratio:.6f}"
+            )
+        if args.ordered_output_csv and ordered_scored:
+            ordered_path = Path(args.ordered_output_csv)
+            write_dataclass_rows_csv(ordered_path, ordered_scored)
+            print(f"\nSaved full ordered-lines table to: {ordered_path}")
+        elif args.ordered_output_csv:
+            print("\nNo ordered lines to save after filtering.")
 
     if args.output_csv:
         out_path = Path(args.output_csv)
