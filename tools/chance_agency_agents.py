@@ -19,12 +19,20 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence, Tuple
 
-from tools.historical_number_scorer import (
-    ScoredAiLine,
-    load_draws_from_csv,
-    predict_ai_ordered_lines,
-    score_values,
-)
+try:
+    from tools.historical_number_scorer import (
+        ScoredAiLine,
+        load_draws_from_csv,
+        predict_ai_ordered_lines,
+        score_values,
+    )
+except ModuleNotFoundError:  # pragma: no cover - direct script execution fallback.
+    from historical_number_scorer import (  # type: ignore
+        ScoredAiLine,
+        load_draws_from_csv,
+        predict_ai_ordered_lines,
+        score_values,
+    )
 
 
 @dataclass(frozen=True)

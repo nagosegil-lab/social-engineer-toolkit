@@ -13,15 +13,26 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Sequence
 
-from tools.chance_agency_agents import (
-    AIPredictorAgent,
-    AgencyProfileAgent,
-    BacktestAgent,
-    DataCollectorAgent,
-    FeatureAnalystAgent,
-    PortfolioBuilderAgent,
-    ProfileRegistry,
-)
+try:
+    from tools.chance_agency_agents import (
+        AIPredictorAgent,
+        AgencyProfileAgent,
+        BacktestAgent,
+        DataCollectorAgent,
+        FeatureAnalystAgent,
+        PortfolioBuilderAgent,
+        ProfileRegistry,
+    )
+except ImportError:
+    from chance_agency_agents import (
+        AIPredictorAgent,
+        AgencyProfileAgent,
+        BacktestAgent,
+        DataCollectorAgent,
+        FeatureAnalystAgent,
+        PortfolioBuilderAgent,
+        ProfileRegistry,
+    )
 
 
 HTML_PAGE = """<!doctype html>
@@ -41,10 +52,13 @@ HTML_PAGE = """<!doctype html>
     textarea { min-height: 140px; font-family: monospace; }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .row4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     button { background: #1f6feb; color: #fff; border: 0; border-radius: 9px; padding: 12px 14px; font-size: 15px; width: 100%; margin-top: 10px; }
+    button.secondary { background: #1f2937; }
+    button.success { background: #0f9d58; }
     pre { white-space: pre-wrap; word-break: break-word; margin: 0; font-size: 13px; line-height: 1.45; }
     .muted { color: #666; font-size: 12px; }
-    @media (max-width: 600px) { .row, .row4 { grid-template-columns: 1fr; } }
+    @media (max-width: 600px) { .row, .row4, .actions { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -54,6 +68,10 @@ HTML_PAGE = """<!doctype html>
       <h2>1) Paste history CSV</h2>
       <p class="muted">Header example: spade,heart,diamond,club,draw_id</p>
       <textarea id="historyCsv" placeholder="Paste CSV with header..."></textarea>
+      <div class="actions">
+        <button id="saveHistoryBtn" type="button" class="secondary">Save history locally</button>
+        <button id="loadHistoryBtn" type="button" class="success">Load saved history</button>
+      </div>
       <div class="row">
         <div>
           <label>Columns (optional, comma-separated)</label>
@@ -105,12 +123,50 @@ HTML_PAGE = """<!doctype html>
 
     <div class="card">
       <h2>Result</h2>
+      <button id="copyTicketBtn" type="button" class="secondary">Copy ticket</button>
       <pre id="out">No analysis yet.</pre>
     </div>
   </div>
 
   <script>
     const out = document.getElementById('out');
+    let lastTicketText = '';
+
+    const saveHistory = () => {
+      localStorage.setItem('chance_history_csv', document.getElementById('historyCsv').value || '');
+      localStorage.setItem('chance_columns', document.getElementById('columns').value || '');
+      localStorage.setItem('chance_exclude_columns', document.getElementById('excludeColumns').value || '');
+      localStorage.setItem('chance_append_cols', document.getElementById('appendCols').value || '');
+      out.textContent = 'History saved locally on this device.';
+    };
+
+    const loadHistory = () => {
+      document.getElementById('historyCsv').value = localStorage.getItem('chance_history_csv') || '';
+      document.getElementById('columns').value = localStorage.getItem('chance_columns') || 'spade,heart,diamond,club';
+      document.getElementById('excludeColumns').value = localStorage.getItem('chance_exclude_columns') || 'draw_id,datetime,date,time';
+      document.getElementById('appendCols').value = localStorage.getItem('chance_append_cols') || 'spade,heart,diamond,club';
+      out.textContent = 'Saved history loaded.';
+    };
+
+    const copyTicket = async () => {
+      if (!lastTicketText) {
+        out.textContent = 'No ticket generated yet. Run analysis first.';
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(lastTicketText);
+        out.textContent = out.textContent + '\\n\\nTicket copied to clipboard.';
+      } catch (err) {
+        out.textContent = out.textContent + '\\n\\nCopy failed. You can copy manually from the result.';
+      }
+    };
+
+    document.getElementById('saveHistoryBtn').addEventListener('click', saveHistory);
+    document.getElementById('loadHistoryBtn').addEventListener('click', loadHistory);
+    document.getElementById('copyTicketBtn').addEventListener('click', copyTicket);
+
+    loadHistory();
+
     document.getElementById('runBtn').addEventListener('click', async () => {
       out.textContent = 'Running...';
       const append = [
@@ -143,6 +199,12 @@ HTML_PAGE = """<!doctype html>
         const doubles = data.portfolio.double_lines.map((v, i) => `${i+1}. ${v.replaceAll('|', ', ')}`).join('\\n');
         const backups = data.portfolio.backup_lines.map((v, i) => `${i+1}. ${v.replaceAll('|', ', ')}`).join('\\n');
         const aiTop = data.ai_lines.slice(0, 8).map((x, i) => `${i+1}. ${x.values.replaceAll('|', ', ')}  [score=${x.score}]`).join('\\n');
+        lastTicketText =
+`Double lines:
+${doubles}
+
+Backup lines:
+${backups}`;
         out.textContent =
 `Draws: ${data.features.draw_count}
 Top values: ${data.features.top_values.join(', ')}
