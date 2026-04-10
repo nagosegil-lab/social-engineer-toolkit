@@ -7,6 +7,7 @@ import argparse
 import csv
 import io
 import json
+import subprocess
 import tempfile
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -53,12 +54,14 @@ HTML_PAGE = """<!doctype html>
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .row4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
     .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .actions3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
     button { background: #1f6feb; color: #fff; border: 0; border-radius: 9px; padding: 12px 14px; font-size: 15px; width: 100%; margin-top: 10px; }
     button.secondary { background: #1f2937; }
     button.success { background: #0f9d58; }
+    input[type="file"] { background: #fff; padding: 9px; }
     pre { white-space: pre-wrap; word-break: break-word; margin: 0; font-size: 13px; line-height: 1.45; }
     .muted { color: #666; font-size: 12px; }
-    @media (max-width: 600px) { .row, .row4, .actions { grid-template-columns: 1fr; } }
+    @media (max-width: 600px) { .row, .row4, .actions, .actions3 { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -94,6 +97,12 @@ HTML_PAGE = """<!doctype html>
       </div>
       <label>Append target columns</label>
       <input id="appendCols" value="spade,heart,diamond,club" />
+      <div class="actions3">
+        <input id="photoInput" type="file" accept="image/*" capture="environment" />
+        <button id="scanPhotoBtn" type="button" class="secondary">Scan from photo (OCR)</button>
+        <button id="clearLatestBtn" type="button" class="secondary">Clear latest draw</button>
+      </div>
+      <p class="muted">Tip: capture only the 4 result cards for best OCR accuracy.</p>
     </div>
 
     <div class="card">
@@ -128,9 +137,11 @@ HTML_PAGE = """<!doctype html>
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script>
     const out = document.getElementById('out');
     let lastTicketText = '';
+    const VALID_VALUES = new Set(['A', 'K', 'Q', 'J', '10', '9', '8', '7']);
 
     const saveHistory = () => {
       localStorage.setItem('chance_history_csv', document.getElementById('historyCsv').value || '');
@@ -161,9 +172,121 @@ HTML_PAGE = """<!doctype html>
       }
     };
 
+    const normalizeValueToken = (raw) => {
+      if (!raw) return null;
+      const token = String(raw).toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (!token) return null;
+      if (VALID_VALUES.has(token)) return token;
+      if (['IO', 'I0', '1O', '10', 'LO', 'L0', 'TO', 'T0'].includes(token)) return '10';
+      if (['O', '0'].includes(token)) return '10';
+      if (['A', 'K', 'Q', 'J', '9', '8', '7'].includes(token)) return token;
+      return null;
+    };
+
+    const extractDrawFromWords = (words) => {
+      const candidates = [];
+      for (const word of words || []) {
+        const bits = String(word.text || '').split(/[^A-Za-z0-9]+/).filter(Boolean);
+        for (const bit of bits) {
+          const token = normalizeValueToken(bit);
+          if (!token || !VALID_VALUES.has(token)) continue;
+          const bbox = word.bbox || {};
+          const x = ((bbox.x0 || 0) + (bbox.x1 || 0)) / 2;
+          const y = ((bbox.y0 || 0) + (bbox.y1 || 0)) / 2;
+          const conf = Number(word.confidence || 0);
+          candidates.push({ token, x, y, conf });
+        }
+      }
+      if (candidates.length < 4) return [];
+
+      const buckets = new Map();
+      const bucketSize = 60;
+      for (const item of candidates) {
+        const key = Math.round(item.y / bucketSize);
+        if (!buckets.has(key)) buckets.set(key, []);
+        buckets.get(key).push(item);
+      }
+
+      let best = [];
+      let bestScore = -1;
+      for (const items of buckets.values()) {
+        if (items.length < 4) continue;
+        const avgConf = items.reduce((sum, row) => sum + row.conf, 0) / items.length;
+        const score = items.length * 100 + avgConf;
+        if (score > bestScore) {
+          bestScore = score;
+          best = items;
+        }
+      }
+
+      const chosen = (best.length >= 4 ? best : candidates)
+        .slice()
+        .sort((a, b) => a.x - b.x)
+        .map((row) => row.token);
+      return chosen.slice(0, 4);
+    };
+
+    const extractDrawFromText = (text) => {
+      const bits = String(text || '').split(/[^A-Za-z0-9]+/).filter(Boolean);
+      const values = [];
+      for (const bit of bits) {
+        const token = normalizeValueToken(bit);
+        if (token && VALID_VALUES.has(token)) values.push(token);
+      }
+      return values.slice(0, 4);
+    };
+
+    const setLatestDrawFields = (values) => {
+      if (!values || values.length !== 4) return;
+      document.getElementById('s1').value = values[0];
+      document.getElementById('s2').value = values[1];
+      document.getElementById('s3').value = values[2];
+      document.getElementById('s4').value = values[3];
+    };
+
+    const clearLatestDraw = () => {
+      document.getElementById('s1').value = '';
+      document.getElementById('s2').value = '';
+      document.getElementById('s3').value = '';
+      document.getElementById('s4').value = '';
+      out.textContent = 'Latest draw fields cleared.';
+    };
+
+    const scanPhoto = async () => {
+      const fileInput = document.getElementById('photoInput');
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) {
+        out.textContent = 'Please choose or capture a photo first.';
+        return;
+      }
+      if (!window.Tesseract) {
+        out.textContent = 'OCR engine was not loaded. Please refresh and try again.';
+        return;
+      }
+
+      out.textContent = 'Scanning image (OCR)... this can take a few seconds.';
+      try {
+        const result = await window.Tesseract.recognize(file, 'eng');
+        let draw = extractDrawFromWords(result?.data?.words || []);
+        if (draw.length < 4) {
+          draw = extractDrawFromText(result?.data?.text || '');
+        }
+        if (draw.length < 4) {
+          out.textContent = 'Could not detect 4 values automatically. Try a clearer crop around the cards.';
+          return;
+        }
+        setLatestDrawFields(draw);
+        out.textContent = `OCR detected latest draw: ${draw.join(', ')}\\nPlease verify and then press Analyze.`;
+      } catch (err) {
+        out.textContent = `OCR failed: ${err.message}`;
+      }
+    };
+
     document.getElementById('saveHistoryBtn').addEventListener('click', saveHistory);
     document.getElementById('loadHistoryBtn').addEventListener('click', loadHistory);
     document.getElementById('copyTicketBtn').addEventListener('click', copyTicket);
+    document.getElementById('scanPhotoBtn').addEventListener('click', scanPhoto);
+    document.getElementById('clearLatestBtn').addEventListener('click', clearLatestDraw);
 
     loadHistory();
 
@@ -281,6 +404,69 @@ def _build_temp_csv_from_payload(payload: Dict[str, Any]) -> Path:
         for row in rows:
             writer.writerow(row)
     return output
+
+
+def _normalize_card_tokens(raw_text: str) -> List[str]:
+    normalized = raw_text.upper()
+    for old, new in (
+        ("♠", " "),
+        ("♥", " "),
+        ("♦", " "),
+        ("♣", " "),
+        ("\n", " "),
+        ("\r", " "),
+        ("|", " "),
+        (",", " "),
+    ):
+        normalized = normalized.replace(old, new)
+
+    replacements = {
+        "A": "A",
+        "K": "K",
+        "Q": "Q",
+        "J": "J",
+        "10": "10",
+        "0": "10",  # common OCR error for 10
+        "T": "10",
+        "9": "9",
+        "8": "8",
+        "7": "7",
+    }
+    tokens: List[str] = []
+    for raw in normalized.split():
+        token = replacements.get(raw)
+        if token in {"A", "K", "Q", "J", "10", "9", "8", "7"}:
+            tokens.append(token)
+    return tokens
+
+
+def _ocr_with_tesseract(image_path: Path) -> str:
+    result = subprocess.run(
+        ["tesseract", str(image_path), "stdout", "-l", "eng", "--psm", "6"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "tesseract OCR failed")
+    return result.stdout
+
+
+def extract_draw_from_image(image_bytes: bytes) -> List[str]:
+    fd, temp_path = tempfile.mkstemp(suffix=".png")
+    Path(temp_path).unlink(missing_ok=True)
+    path = Path(temp_path)
+    path.write_bytes(image_bytes)
+    try:
+        text = _ocr_with_tesseract(path)
+        tokens = _normalize_card_tokens(text)
+        if len(tokens) < 4:
+            raise ValueError(
+                f"OCR found only {len(tokens)} card tokens. Make sure the screenshot clearly shows 4 values."
+            )
+        return tokens[:4]
+    finally:
+        path.unlink(missing_ok=True)
 
 
 def analyze_payload(payload: Dict[str, Any], profiles_dir: Path | None) -> Dict[str, Any]:
@@ -413,6 +599,15 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
 
     def do_POST(self) -> None:  # noqa: N802
+        if self.path == "/ocr-draw":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                image_bytes = self.rfile.read(length)
+                draw = extract_draw_from_image(image_bytes)
+                self._send_json(HTTPStatus.OK, {"draw": draw})
+            except Exception as exc:  # noqa: BLE001
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
         if self.path != "/analyze":
             self._send_json(HTTPStatus.NOT_FOUND, {"error": "Not found"})
             return
