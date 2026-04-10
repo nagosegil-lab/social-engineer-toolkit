@@ -149,6 +149,7 @@ HTML_PAGE = """<!doctype html>
   <script>
     const out = document.getElementById('out');
     const installBtn = document.getElementById('installBtn');
+    const runBtn = document.getElementById('runBtn');
     let deferredInstallPrompt = null;
     let lastTicketText = '';
     const VALID_VALUES = new Set(['A', 'K', 'Q', 'J', '10', '9', '8', '7']);
@@ -166,13 +167,82 @@ HTML_PAGE = """<!doctype html>
       document.getElementById('columns').value = localStorage.getItem('chance_columns') || 'spade,heart,diamond,club';
       document.getElementById('excludeColumns').value = localStorage.getItem('chance_exclude_columns') || 'draw_id,datetime,date,time';
       document.getElementById('appendCols').value = localStorage.getItem('chance_append_cols') || 'spade,heart,diamond,club';
+      lastTicketText = localStorage.getItem('chance_last_ticket') || '';
       out.textContent = 'Saved history loaded.';
+    };
+
+    const runAnalysis = async () => {
+      out.textContent = 'Running...';
+      const append = [
+        document.getElementById('s1').value.trim(),
+        document.getElementById('s2').value.trim(),
+        document.getElementById('s3').value.trim(),
+        document.getElementById('s4').value.trim(),
+      ].filter(Boolean);
+      const payload = {
+        history_csv: document.getElementById('historyCsv').value,
+        columns: document.getElementById('columns').value,
+        exclude_columns: document.getElementById('excludeColumns').value,
+        append_draw: append.length === 4 ? append : [],
+        append_columns: document.getElementById('appendCols').value,
+        top_ai: Number(document.getElementById('topAi').value || 10),
+        backtest_last: Number(document.getElementById('backtestLast').value || 12),
+        double_lines: Number(document.getElementById('doubleLines').value || 3),
+        backup_lines: Number(document.getElementById('backupLines').value || 4),
+      };
+
+      const res = await fetch('/analyze', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Request failed');
+
+      const doubles = data.portfolio.double_lines.map((v, i) => `${i+1}. ${v.replaceAll('|', ', ')}`).join('\\n');
+      const backups = data.portfolio.backup_lines.map((v, i) => `${i+1}. ${v.replaceAll('|', ', ')}`).join('\\n');
+      const aiTop = data.ai_lines.slice(0, 8).map((x, i) => `${i+1}. ${x.values.replaceAll('|', ', ')}  [score=${x.score}]`).join('\\n');
+      lastTicketText =
+`Double lines:
+${doubles}
+
+Backup lines:
+${backups}`;
+      localStorage.setItem('chance_last_ticket', lastTicketText);
+      out.textContent =
+`Draws: ${data.features.draw_count}
+Top values: ${data.features.top_values.join(', ')}
+
+Backtest:
+- exact hit rate: ${(data.backtest.exact_hit_rate*100).toFixed(2)}%
+- avg best position matches: ${data.backtest.avg_best_position_matches}/4
+- avg best symbol overlap: ${data.backtest.avg_best_symbol_overlap}/4
+
+Double lines:
+${doubles}
+
+Backup lines:
+${backups}
+
+Top AI lines:
+${aiTop}`;
+      return data;
     };
 
     const copyTicket = async () => {
       if (!lastTicketText) {
-        out.textContent = 'No ticket generated yet. Run analysis first.';
-        return;
+        const hasHistory = Boolean((document.getElementById('historyCsv').value || '').trim());
+        if (!hasHistory) {
+          out.textContent = 'No history found. Paste CSV or tap "Load saved history" first.';
+          return;
+        }
+        out.textContent = 'No ticket yet. Running analysis from saved history...';
+        try {
+          await runAnalysis();
+        } catch (err) {
+          out.textContent = `Could not auto-generate ticket: ${err.message}`;
+          return;
+        }
       }
       try {
         await navigator.clipboard.writeText(lastTicketText);
@@ -336,61 +406,9 @@ HTML_PAGE = """<!doctype html>
 
     loadHistory();
 
-    document.getElementById('runBtn').addEventListener('click', async () => {
-      out.textContent = 'Running...';
-      const append = [
-        document.getElementById('s1').value.trim(),
-        document.getElementById('s2').value.trim(),
-        document.getElementById('s3').value.trim(),
-        document.getElementById('s4').value.trim(),
-      ].filter(Boolean);
-      const payload = {
-        history_csv: document.getElementById('historyCsv').value,
-        columns: document.getElementById('columns').value,
-        exclude_columns: document.getElementById('excludeColumns').value,
-        append_draw: append.length === 4 ? append : [],
-        append_columns: document.getElementById('appendCols').value,
-        top_ai: Number(document.getElementById('topAi').value || 10),
-        backtest_last: Number(document.getElementById('backtestLast').value || 12),
-        double_lines: Number(document.getElementById('doubleLines').value || 3),
-        backup_lines: Number(document.getElementById('backupLines').value || 4),
-      };
-
+    runBtn.addEventListener('click', async () => {
       try {
-        const res = await fetch('/analyze', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify(payload),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Request failed');
-
-        const doubles = data.portfolio.double_lines.map((v, i) => `${i+1}. ${v.replaceAll('|', ', ')}`).join('\\n');
-        const backups = data.portfolio.backup_lines.map((v, i) => `${i+1}. ${v.replaceAll('|', ', ')}`).join('\\n');
-        const aiTop = data.ai_lines.slice(0, 8).map((x, i) => `${i+1}. ${x.values.replaceAll('|', ', ')}  [score=${x.score}]`).join('\\n');
-        lastTicketText =
-`Double lines:
-${doubles}
-
-Backup lines:
-${backups}`;
-        out.textContent =
-`Draws: ${data.features.draw_count}
-Top values: ${data.features.top_values.join(', ')}
-
-Backtest:
-- exact hit rate: ${(data.backtest.exact_hit_rate*100).toFixed(2)}%
-- avg best position matches: ${data.backtest.avg_best_position_matches}/4
-- avg best symbol overlap: ${data.backtest.avg_best_symbol_overlap}/4
-
-Double lines:
-${doubles}
-
-Backup lines:
-${backups}
-
-Top AI lines:
-${aiTop}`;
+        await runAnalysis();
       } catch (err) {
         out.textContent = `Error: ${err.message}`;
       }
