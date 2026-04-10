@@ -41,6 +41,8 @@ HTML_PAGE = """<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#1f6feb" />
+  <link rel="manifest" href="/manifest.webmanifest" />
   <title>Chance AI Mobile</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 0; background: #f2f4f7; color: #111; }
@@ -67,6 +69,12 @@ HTML_PAGE = """<!doctype html>
 <body>
   <div class="wrap">
     <h1>Chance AI Mobile</h1>
+    <div class="card">
+      <h2>Install app</h2>
+      <p class="muted">Install this web app to your home screen for one-tap access.</p>
+      <button id="installBtn" type="button" class="success">Install to Home Screen</button>
+      <p class="muted" id="installHint">If install dialog does not open, use browser menu: Add to Home screen.</p>
+    </div>
     <div class="card">
       <h2>1) Paste history CSV</h2>
       <p class="muted">Header example: spade,heart,diamond,club,draw_id</p>
@@ -140,6 +148,8 @@ HTML_PAGE = """<!doctype html>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script>
     const out = document.getElementById('out');
+    const installBtn = document.getElementById('installBtn');
+    let deferredInstallPrompt = null;
     let lastTicketText = '';
     const VALID_VALUES = new Set(['A', 'K', 'Q', 'J', '10', '9', '8', '7']);
 
@@ -287,6 +297,42 @@ HTML_PAGE = """<!doctype html>
     document.getElementById('copyTicketBtn').addEventListener('click', copyTicket);
     document.getElementById('scanPhotoBtn').addEventListener('click', scanPhoto);
     document.getElementById('clearLatestBtn').addEventListener('click', clearLatestDraw);
+
+    installBtn.addEventListener('click', async () => {
+      if (deferredInstallPrompt) {
+        deferredInstallPrompt.prompt();
+        const choice = await deferredInstallPrompt.userChoice;
+        if (choice.outcome === 'accepted') {
+          out.textContent = 'App installation accepted.';
+        } else {
+          out.textContent = 'Install canceled.';
+        }
+        deferredInstallPrompt = null;
+        installBtn.disabled = true;
+        return;
+      }
+      out.textContent = 'Install dialog unavailable. Use browser menu: Add to Home screen.';
+    });
+
+    window.addEventListener('beforeinstallprompt', (event) => {
+      event.preventDefault();
+      deferredInstallPrompt = event;
+      installBtn.disabled = false;
+      document.getElementById('installHint').textContent = 'Tap "Install to Home Screen" to add the app.';
+    });
+
+    window.addEventListener('appinstalled', () => {
+      out.textContent = 'App installed on home screen successfully.';
+      installBtn.disabled = true;
+    });
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/service-worker.js').catch(() => {
+          // Silent failure - app still works without offline caching.
+        });
+      });
+    }
 
     loadHistory();
 
@@ -575,6 +621,18 @@ def analyze_payload(payload: Dict[str, Any], profiles_dir: Path | None) -> Dict[
 class Handler(BaseHTTPRequestHandler):
     profiles_dir: Path | None = None
 
+    def _send_raw(
+        self,
+        status: HTTPStatus,
+        body: bytes,
+        content_type: str,
+    ) -> None:
+        self.send_response(status.value)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _send_json(self, status: HTTPStatus, payload: Dict[str, Any]) -> None:
         raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status.value)
@@ -587,11 +645,49 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/" or self.path.startswith("/?"):
             raw = HTML_PAGE.encode("utf-8")
-            self.send_response(HTTPStatus.OK.value)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(raw)))
-            self.end_headers()
-            self.wfile.write(raw)
+            self._send_raw(HTTPStatus.OK, raw, "text/html; charset=utf-8")
+            return
+        if self.path == "/manifest.webmanifest":
+            manifest = {
+                "name": "Chance AI Mobile",
+                "short_name": "ChanceAI",
+                "start_url": "/",
+                "scope": "/",
+                "display": "standalone",
+                "background_color": "#f2f4f7",
+                "theme_color": "#1f6feb",
+                "description": "Mobile AI assistant for Chance analysis.",
+                "icons": [
+                    {
+                        "src": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOTIiIGhlaWdodD0iMTkyIiB2aWV3Qm94PSIwIDAgMTkyIDE5MiI+PHJlY3Qgd2lkdGg9IjE5MiIgaGVpZ2h0PSIxOTIiIHJ4PSIyOCIgc3R5bGU9ImZpbGw6IzFmNmZlYiIvPjx0ZXh0IHg9Ijk2IiB5PSIxMDgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIHN0eWxlPSJmb250LXNpemU6NTA7Zm9udC1mYW1pbHk6QXJpYWw7ZmlsbDojZmZmIj5DQTwvdGV4dD48L3N2Zz4=",
+                        "sizes": "192x192",
+                        "type": "image/svg+xml",
+                    }
+                ],
+            }
+            raw = json.dumps(manifest, ensure_ascii=False).encode("utf-8")
+            self._send_raw(HTTPStatus.OK, raw, "application/manifest+json; charset=utf-8")
+            return
+        if self.path == "/service-worker.js":
+            service_worker = """
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open('chance-ai-mobile-v1').then((cache) => cache.addAll(['/']))
+  );
+  self.skipWaiting();
+});
+self.addEventListener('activate', (event) => {
+  event.waitUntil(self.clients.claim());
+});
+self.addEventListener('fetch', (event) => {
+  if (event.request.method !== 'GET') return;
+  event.respondWith(
+    caches.match(event.request).then((cached) => cached || fetch(event.request))
+  );
+});
+""".strip()
+            raw = service_worker.encode("utf-8")
+            self._send_raw(HTTPStatus.OK, raw, "application/javascript; charset=utf-8")
             return
         if self.path == "/health":
             self._send_json(HTTPStatus.OK, {"ok": True})
