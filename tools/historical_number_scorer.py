@@ -14,6 +14,7 @@ import argparse
 import csv
 import itertools
 import math
+from collections import Counter, defaultdict
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
@@ -67,6 +68,17 @@ class ScoredOrderedLine:
     trend_ratio: float
     last_seen_draw: int
     draws_since_last_seen: int
+
+
+@dataclass(frozen=True)
+class ScoredAiLine:
+    values: str
+    score: float
+    probability: float
+    recency_bonus: float
+    transition_bonus: float
+    synergy_bonus: float
+    seen_before: bool
 
 
 def _normalize_token(raw: str) -> str:
@@ -434,6 +446,167 @@ def score_ordered_lines(
     return scored
 
 
+def predict_ai_ordered_lines(
+    draws: Sequence[Sequence[str]],
+    top_lines: int = 10,
+    position_top_k: int = 5,
+    recent_window: str = "0.3",
+    half_life: float = 20.0,
+    smoothing: float = 0.15,
+    novelty_lookback: int = 8,
+) -> List[ScoredAiLine]:
+    """Predict likely next ordered lines with a simple hybrid probabilistic model.
+
+    Model blend:
+    - decayed per-position base probability
+    - per-position transition probability from the latest observed draw
+    - recent-window momentum bonus
+    - line-level pair synergy bonus
+    """
+    if not draws:
+        return []
+    if top_lines <= 0:
+        return []
+    if position_top_k < 2:
+        raise ValueError("position_top_k must be >= 2.")
+    if half_life <= 0:
+        raise ValueError("half_life must be > 0.")
+    if smoothing <= 0:
+        raise ValueError("smoothing must be > 0.")
+
+    length_counter = Counter(len(draw) for draw in draws if draw)
+    if not length_counter:
+        return []
+    line_length = length_counter.most_common(1)[0][0]
+    normalized_draws = [list(draw[:line_length]) for draw in draws if len(draw) >= line_length]
+    if len(normalized_draws) < 3:
+        return []
+
+    total_draws = len(normalized_draws)
+    recent_draw_count = _resolve_recent_window(recent_window, total_draws)
+    recent_start_index = total_draws - recent_draw_count
+
+    symbols = sorted({value for draw in normalized_draws for value in draw})
+    symbol_count = len(symbols)
+    if symbol_count == 0:
+        return []
+
+    # Exponential decay: recent draws matter more.
+    decay_base = 0.5 ** (1.0 / half_life)
+    draw_weights = [decay_base ** (total_draws - 1 - idx) for idx in range(total_draws)]
+
+    base_counts: List[Dict[str, float]] = [defaultdict(float) for _ in range(line_length)]
+    recent_counts: List[Dict[str, float]] = [defaultdict(float) for _ in range(line_length)]
+    trans_counts: List[Dict[Tuple[str, str], float]] = [defaultdict(float) for _ in range(line_length)]
+    prev_totals: List[Dict[str, float]] = [defaultdict(float) for _ in range(line_length)]
+
+    for draw_idx, draw in enumerate(normalized_draws):
+        weight = draw_weights[draw_idx]
+        for pos, value in enumerate(draw):
+            base_counts[pos][value] += weight
+            if draw_idx >= recent_start_index:
+                recent_counts[pos][value] += 1.0
+
+        if draw_idx == 0:
+            continue
+        prev_draw = normalized_draws[draw_idx - 1]
+        for pos in range(line_length):
+            prev_val = prev_draw[pos]
+            curr_val = draw[pos]
+            trans_counts[pos][(prev_val, curr_val)] += weight
+            prev_totals[pos][prev_val] += weight
+
+    # Pair synergy frequencies within each historical draw.
+    pair_counts: Dict[Tuple[int, str, int, str], int] = defaultdict(int)
+    for draw in normalized_draws:
+        for left in range(line_length):
+            for right in range(left + 1, line_length):
+                pair_counts[(left, draw[left], right, draw[right])] += 1
+
+    max_pair_count = max(pair_counts.values()) if pair_counts else 1
+    latest_draw = normalized_draws[-1]
+    recent_history = {tuple(draw) for draw in normalized_draws[-novelty_lookback:]}
+    full_history = {tuple(draw) for draw in normalized_draws}
+
+    position_scores: List[List[Tuple[str, float, float, float]]] = []
+    for pos in range(line_length):
+        total_base = sum(base_counts[pos].values())
+        total_recent = sum(recent_counts[pos].values())
+        prev_symbol = latest_draw[pos]
+        prev_total = prev_totals[pos].get(prev_symbol, 0.0)
+
+        scored_symbols: List[Tuple[str, float, float, float]] = []
+        for symbol in symbols:
+            base_prob = (base_counts[pos].get(symbol, 0.0) + smoothing) / (
+                total_base + smoothing * symbol_count
+            )
+            transition_prob = (
+                trans_counts[pos].get((prev_symbol, symbol), 0.0) + smoothing
+            ) / (prev_total + smoothing * symbol_count)
+            recent_prob = (recent_counts[pos].get(symbol, 0.0) + smoothing) / (
+                total_recent + smoothing * symbol_count
+            )
+
+            # Blend probabilities into one position score.
+            blended = 0.5 * base_prob + 0.3 * transition_prob + 0.2 * recent_prob
+            scored_symbols.append((symbol, blended, transition_prob, recent_prob))
+
+        scored_symbols.sort(key=lambda item: item[1], reverse=True)
+        position_scores.append(scored_symbols[:position_top_k])
+
+    candidates: List[ScoredAiLine] = []
+    for line_symbols in itertools.product(*[[item[0] for item in pos] for pos in position_scores]):
+        line_probability = 1.0
+        transition_bonus = 0.0
+        recency_bonus = 0.0
+        for pos, symbol in enumerate(line_symbols):
+            scored_map = {item[0]: item for item in position_scores[pos]}
+            _, blended, transition_prob, recent_prob = scored_map[symbol]
+            line_probability *= blended
+            transition_bonus += transition_prob
+            recency_bonus += recent_prob
+
+        pair_bonus_raw = 0.0
+        pair_count = 0
+        for left in range(line_length):
+            for right in range(left + 1, line_length):
+                pair_bonus_raw += pair_counts.get(
+                    (left, line_symbols[left], right, line_symbols[right]),
+                    0,
+                ) / max_pair_count
+                pair_count += 1
+        synergy_bonus = pair_bonus_raw / max(pair_count, 1)
+
+        # Penalize very recent repeats; keep mild penalty for already-seen lines.
+        seen_before = tuple(line_symbols) in full_history
+        novelty_factor = 0.86 if tuple(line_symbols) in recent_history else 1.0
+        history_factor = 0.96 if seen_before else 1.02
+
+        final_score = line_probability * (1.0 + 0.2 * synergy_bonus) * novelty_factor * history_factor
+        candidates.append(
+            ScoredAiLine(
+                values="|".join(line_symbols),
+                score=round(final_score, 9),
+                probability=round(line_probability, 9),
+                recency_bonus=round(recency_bonus / line_length, 6),
+                transition_bonus=round(transition_bonus / line_length, 6),
+                synergy_bonus=round(synergy_bonus, 6),
+                seen_before=seen_before,
+            )
+        )
+
+    candidates.sort(
+        key=lambda row: (
+            row.score,
+            row.transition_bonus,
+            row.recency_bonus,
+            row.synergy_bonus,
+        ),
+        reverse=True,
+    )
+    return candidates[:top_lines]
+
+
 def write_dataclass_rows_csv(path: Path, rows: Iterable[Any]) -> None:
     items = list(rows)
     if not items:
@@ -527,6 +700,46 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional output path to save full ordered-lines table as CSV.",
     )
+    parser.add_argument(
+        "--ai-lines",
+        action="store_true",
+        help="Enable hybrid AI-like position-aware prediction for next ordered lines.",
+    )
+    parser.add_argument(
+        "--top-ai",
+        type=int,
+        default=10,
+        help="How many AI predicted lines to print when --ai-lines is enabled.",
+    )
+    parser.add_argument(
+        "--ai-position-top-k",
+        type=int,
+        default=5,
+        help="Candidate symbols kept per position in AI mode.",
+    )
+    parser.add_argument(
+        "--ai-half-life",
+        type=float,
+        default=20.0,
+        help="Exponential decay half-life in draws for AI mode.",
+    )
+    parser.add_argument(
+        "--ai-smoothing",
+        type=float,
+        default=0.15,
+        help="Laplace smoothing constant for AI mode probabilities.",
+    )
+    parser.add_argument(
+        "--ai-novelty-lookback",
+        type=int,
+        default=8,
+        help="Recent draw lookback used for repeat-penalty in AI mode.",
+    )
+    parser.add_argument(
+        "--ai-output-csv",
+        default=None,
+        help="Optional output path to save full AI predicted lines as CSV.",
+    )
     return parser
 
 
@@ -605,6 +818,32 @@ def main() -> int:
             print(f"\nSaved full ordered-lines table to: {ordered_path}")
         elif args.ordered_output_csv:
             print("\nNo ordered lines to save after filtering.")
+
+    if args.ai_lines:
+        ai_scored = predict_ai_ordered_lines(
+            draws=draws,
+            top_lines=max(args.top_ai, 1),
+            position_top_k=args.ai_position_top_k,
+            recent_window=args.recent_window,
+            half_life=args.ai_half_life,
+            smoothing=args.ai_smoothing,
+            novelty_lookback=args.ai_novelty_lookback,
+        )
+        print()
+        print("Top AI predicted ordered lines (position-aware):")
+        print("values\tscore\tprobability\ttransition\trecency\tsynergy\tseen_before")
+        for row in ai_scored[: args.top_ai]:
+            print(
+                f"{row.values}\t{row.score:.9f}\t{row.probability:.9f}\t"
+                f"{row.transition_bonus:.6f}\t{row.recency_bonus:.6f}\t"
+                f"{row.synergy_bonus:.6f}\t{row.seen_before}"
+            )
+        if args.ai_output_csv and ai_scored:
+            ai_path = Path(args.ai_output_csv)
+            write_dataclass_rows_csv(ai_path, ai_scored)
+            print(f"\nSaved full AI lines table to: {ai_path}")
+        elif args.ai_output_csv:
+            print("\nNo AI lines to save after filtering.")
 
     if args.output_csv:
         out_path = Path(args.output_csv)

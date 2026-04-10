@@ -109,3 +109,30 @@ python3 tools/historical_number_scorer_gui.py
 4. (אופציונלי) מגדירים `Combination size`
 5. לוחצים `Run analysis`
 
+## מצב AI (חיזוי שורות מדויקות לפי מיקום)
+
+נוסף מצב AI היברידי שמחשב הסתברות לשורה הבאה בסדר מדויק (♠♥♦♣), תוך שילוב:
+
+- שכיחות דועכת בזמן (Recency-decay)
+- מעבר בין הגרלות (Transition בין ערך קודם לערך הבא בכל מיקום)
+- בונוס מומנטום לחלון אחרון
+- סינרגיית זוגות בין מיקומים שונים
+
+הרצה:
+
+```bash
+python3 tools/historical_number_scorer.py \
+  --input /path/to/history.csv \
+  --exclude-columns datetime draw_id \
+  --ai-lines \
+  --top-ai 10
+```
+
+דגלים חשובים:
+
+- `--position-top-k` כמה מועמדים לקחת בכל מיקום לפני יצירת צירופים
+- `--ai-half-life` כמה מהר מידע ישן דועך (קטן יותר = מתמקד יותר בהגרלות האחרונות)
+- `--ai-smoothing` החלקה הסתברותית
+- `--ai-novelty-lookback` כמה הגרלות אחורה להעניש חזרתיות חזקה
+- `--ai-output-csv` שמירת טבלת AI מלאה ל־CSV
+
