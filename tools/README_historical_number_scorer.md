@@ -96,6 +96,12 @@ python3 tools/historical_number_scorer.py \
 python3 tools/historical_number_scorer_gui.py
 ```
 
+> הערה: הממשק דורש `tkinter` מותקן במערכת. ברוב מערכות לינוקס ניתן להתקין עם:
+>
+> ```bash
+> sudo apt-get update && sudo apt-get install -y python3-tk
+> ```
+
 בחלון:
 1. בוחרים קובץ CSV
 2. מגדירים עמודות/Exclude (אם צריך)

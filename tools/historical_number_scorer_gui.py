@@ -3,10 +3,20 @@
 
 from __future__ import annotations
 
-import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, messagebox, scrolledtext, ttk
 from typing import List
+
+try:
+    import tkinter as tk
+    from tkinter import filedialog, messagebox, scrolledtext, ttk
+
+    TK_AVAILABLE = True
+    TK_IMPORT_ERROR: Exception | None = None
+except ModuleNotFoundError as exc:
+    tk = None  # type: ignore[assignment]
+    filedialog = messagebox = scrolledtext = ttk = None  # type: ignore[assignment]
+    TK_AVAILABLE = False
+    TK_IMPORT_ERROR = exc
 
 from historical_number_scorer import (
     ScoredCombination,
@@ -188,6 +198,16 @@ class App:
 
 
 def main() -> int:
+    if not TK_AVAILABLE:
+        print(
+            "Tkinter is not installed in this environment. "
+            "Install python3-tk (Linux) and run again."
+        )
+        if TK_IMPORT_ERROR:
+            print(f"Details: {TK_IMPORT_ERROR}")
+        return 1
+
+    assert tk is not None
     root = tk.Tk()
     App(root)
     root.mainloop()
