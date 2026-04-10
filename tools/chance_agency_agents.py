@@ -19,7 +19,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence, Tuple
 
-from historical_number_scorer import (
+from tools.historical_number_scorer import (
     ScoredAiLine,
     load_draws_from_csv,
     predict_ai_ordered_lines,

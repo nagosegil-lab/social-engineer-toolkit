@@ -149,17 +149,31 @@ python3 tools/chance_agency_agents.py \
 python3 tools/chance_agency_agents.py \
   --input /path/to/history.csv \
   --exclude-columns datetime,draw_id \
-  --agents-dir /workspace/external/agency-agents \
+  --agency-profiles-dir /workspace/external/agency-agents \
+  --strict-profiles \
   --top-ai 10
 ```
 
-ניתן לבחור פרופילים ספציפיים דרך:
+## Mobile Web App (לשימוש מהסמארטפון)
 
-- `--agent-orchestrator-profile`
-- `--agent-analyst-profile`
-- `--agent-predictor-profile`
-- `--agent-evaluator-profile`
-- `--agent-ticket-profile`
+נוסף שרת Web קליל שמציג UI מותאם לנייד:
+
+```bash
+python3 tools/chance_mobile_webapp.py --port 8787
+```
+
+ואז פותחים בדפדפן בטלפון:
+
+`http://<IP-של-המחשב>:8787`
+
+במסך:
+1. מדביקים CSV היסטורי
+2. (אופציונלי) מוסיפים הגרלה אחרונה ידנית
+3. לוחצים Analyze
+4. מקבלים אוטומטית:
+   - Backtest
+   - Top AI lines
+   - 3 כפולות + 4 גיבוי
 
 ## מצב AI (חיזוי שורות מדויקות לפי מיקום)
 
