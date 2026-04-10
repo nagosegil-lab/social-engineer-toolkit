@@ -141,6 +141,26 @@ python3 tools/chance_agency_agents.py \
 5. תוצאת Backtest (hit rate)
 6. טופס מאוזן מוכן לשימוש
 
+### חיבור לריפו `agency-agents`
+
+אפשר לחבר ישירות לריפו ששלחת כדי שהמערכת תטען ותציג פרופילי סוכנים אמיתיים:
+
+```bash
+python3 tools/chance_agency_agents.py \
+  --input /path/to/history.csv \
+  --exclude-columns datetime,draw_id \
+  --agents-dir /workspace/external/agency-agents \
+  --top-ai 10
+```
+
+ניתן לבחור פרופילים ספציפיים דרך:
+
+- `--agent-orchestrator-profile`
+- `--agent-analyst-profile`
+- `--agent-predictor-profile`
+- `--agent-evaluator-profile`
+- `--agent-ticket-profile`
+
 ## מצב AI (חיזוי שורות מדויקות לפי מיקום)
 
 נוסף מצב AI היברידי שמחשב הסתברות לשורה הבאה בסדר מדויק (♠♥♦♣), תוך שילוב:

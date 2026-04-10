@@ -17,7 +17,7 @@ import json
 from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable, List, Sequence, Tuple
+from typing import Dict, Iterable, List, Sequence, Tuple
 
 from historical_number_scorer import (
     ScoredAiLine,
@@ -50,6 +50,20 @@ class PortfolioPlan:
     backup_lines: List[str]
 
 
+@dataclass(frozen=True)
+class AgentProfile:
+    role: str
+    name: str
+    description: str
+    path: str
+
+
+@dataclass(frozen=True)
+class ProfileRegistry:
+    loaded: List[AgentProfile]
+    missing_roles: List[str]
+
+
 def _line_to_tuple(values: str) -> Tuple[str, ...]:
     return tuple(values.split("|"))
 
@@ -58,6 +72,57 @@ def _line_overlap_count(left: Sequence[str], right: Sequence[str]) -> int:
     left_count = Counter(left)
     right_count = Counter(right)
     return sum(min(left_count[symbol], right_count[symbol]) for symbol in left_count)
+
+
+def _parse_frontmatter(raw: str) -> Dict[str, str]:
+    """Parse simple YAML-like frontmatter block from markdown."""
+    lines = raw.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}
+    out: Dict[str, str] = {}
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        out[key.strip()] = value.strip()
+    return out
+
+
+class AgencyProfileAgent:
+    ROLE_TO_FILE = {
+        "orchestrator": "specialized/agents-orchestrator.md",
+        "analytics": "specialized/data-analytics-reporter.md",
+        "project_shepherd": "project-management/project-management-project-shepherd.md",
+    }
+
+    def run(self, base_dir: Path, strict: bool = False) -> ProfileRegistry:
+        loaded: List[AgentProfile] = []
+        missing_roles: List[str] = []
+
+        for role, relative_path in self.ROLE_TO_FILE.items():
+            profile_path = base_dir / relative_path
+            if not profile_path.exists():
+                missing_roles.append(role)
+                continue
+
+            raw = profile_path.read_text(encoding="utf-8")
+            frontmatter = _parse_frontmatter(raw)
+            loaded.append(
+                AgentProfile(
+                    role=role,
+                    name=frontmatter.get("name", role),
+                    description=frontmatter.get("description", "N/A"),
+                    path=str(profile_path),
+                )
+            )
+
+        if strict and missing_roles:
+            raise ValueError(
+                f"Missing required agency profiles for roles: {', '.join(missing_roles)}"
+            )
+        return ProfileRegistry(loaded=loaded, missing_roles=missing_roles)
 
 
 class DataCollectorAgent:
@@ -218,6 +283,7 @@ class ReportAgent:
     def render_text(
         self,
         columns: Sequence[str],
+        profiles: ProfileRegistry,
         features: FeatureSummary,
         ai_lines: Sequence[ScoredAiLine],
         backtest: BacktestSummary,
@@ -228,6 +294,15 @@ class ReportAgent:
         lines.append(f"Draws loaded: {features.draw_count}")
         lines.append(f"Columns used: {', '.join(columns)}")
         lines.append(f"Line length: {features.line_length}")
+        lines.append("")
+        lines.append("Agency profile mapping:")
+        if profiles.loaded:
+            for profile in profiles.loaded:
+                lines.append(f"  {profile.role}: {profile.name} ({profile.path})")
+        else:
+            lines.append("  no external agency profiles loaded")
+        if profiles.missing_roles:
+            lines.append(f"  missing roles: {', '.join(profiles.missing_roles)}")
         lines.append("")
         lines.append("Top values:")
         lines.append(", ".join(features.top_values))
@@ -269,6 +344,7 @@ class ReportAgent:
     def render_json(
         self,
         columns: Sequence[str],
+        profiles: ProfileRegistry,
         features: FeatureSummary,
         ai_lines: Sequence[ScoredAiLine],
         backtest: BacktestSummary,
@@ -276,6 +352,10 @@ class ReportAgent:
     ) -> str:
         payload = {
             "columns": list(columns),
+            "profiles": {
+                "loaded": [asdict(profile) for profile in profiles.loaded],
+                "missing_roles": profiles.missing_roles,
+            },
             "features": asdict(features),
             "backtest": asdict(backtest),
             "ai_lines": [asdict(item) for item in ai_lines],
@@ -364,6 +444,16 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional output path to save full report JSON.",
     )
+    parser.add_argument(
+        "--agency-profiles-dir",
+        default="",
+        help="Optional path to external agency-agents repository root.",
+    )
+    parser.add_argument(
+        "--strict-profiles",
+        action="store_true",
+        help="Fail if required agency profiles are missing.",
+    )
     return parser
 
 
@@ -371,6 +461,7 @@ def main() -> int:
     args = _build_parser().parse_args()
 
     collector = DataCollectorAgent()
+    profile_loader = AgencyProfileAgent()
     analyst = FeatureAnalystAgent()
     predictor = AIPredictorAgent()
     backtester = BacktestAgent()
@@ -385,6 +476,10 @@ def main() -> int:
         columns=columns or None,
         exclude_columns=exclude_columns or None,
     )
+    profiles = ProfileRegistry(loaded=[], missing_roles=[])
+    if args.agency_profiles_dir:
+        profiles = profile_loader.run(Path(args.agency_profiles_dir), strict=args.strict_profiles)
+
     features = analyst.run(draws=draws, recent_window=args.recent_window)
     ai_lines = predictor.run(
         draws=draws,
@@ -414,6 +509,7 @@ def main() -> int:
 
     text_report = reporter.render_text(
         columns=chosen_columns,
+        profiles=profiles,
         features=features,
         ai_lines=ai_lines,
         backtest=backtest,
@@ -426,6 +522,7 @@ def main() -> int:
         output_path.write_text(
             reporter.render_json(
                 columns=chosen_columns,
+                profiles=profiles,
                 features=features,
                 ai_lines=ai_lines,
                 backtest=backtest,
