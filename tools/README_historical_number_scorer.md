@@ -109,6 +109,38 @@ python3 tools/historical_number_scorer_gui.py
 4. (אופציונלי) מגדירים `Combination size`
 5. לוחצים `Run analysis`
 
+## Agency Agents (Multi-Agent Pipeline)
+
+נוסף כלי חדש שמריץ צנרת "סוכנים" מלאה על הנתונים:
+
+- `collector` – טוען CSV ומנקה נתונים
+- `analyst` – מחשב סטטיסטיקות ודירוגים בסיסיים
+- `predictor` – מייצר תחזיות AI מסודרות (Position-Aware)
+- `evaluator` – מריץ backtest על חלון אחרון
+- `ticket_builder` – מרכיב טופס כפולות + גיבוי
+
+הרצה לדוגמה:
+
+```bash
+python3 tools/chance_agency_agents.py \
+  --input /path/to/history.csv \
+  --exclude-columns datetime draw_id \
+  --top-ai 10 \
+  --double-lines 3 \
+  --backup-lines 4 \
+  --backtest-last 12 \
+  --output-json /path/to/agency_report.json
+```
+
+פלט הכלי כולל:
+
+1. סטטיסטיקות כלליות
+2. Top values
+3. Top AI lines
+4. Top AI lines
+5. תוצאת Backtest (hit rate)
+6. טופס מאוזן מוכן לשימוש
+
 ## מצב AI (חיזוי שורות מדויקות לפי מיקום)
 
 נוסף מצב AI היברידי שמחשב הסתברות לשורה הבאה בסדר מדויק (♠♥♦♣), תוך שילוב:
@@ -130,7 +162,7 @@ python3 tools/historical_number_scorer.py \
 
 דגלים חשובים:
 
-- `--position-top-k` כמה מועמדים לקחת בכל מיקום לפני יצירת צירופים
+- `--ai-position-top-k` כמה מועמדים לקחת בכל מיקום לפני יצירת צירופים
 - `--ai-half-life` כמה מהר מידע ישן דועך (קטן יותר = מתמקד יותר בהגרלות האחרונות)
 - `--ai-smoothing` החלקה הסתברותית
 - `--ai-novelty-lookback` כמה הגרלות אחורה להעניש חזרתיות חזקה
