@@ -5,11 +5,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 from urllib.parse import quote
+
+# Prevent stdlib/imported dependencies from resolving to src/core/ssl package.
+SCRIPT_DIR = str(Path(__file__).resolve().parent)
+if SCRIPT_DIR in sys.path:
+    sys.path.remove(SCRIPT_DIR)
+    sys.path.append(SCRIPT_DIR)
 
 import requests
 
