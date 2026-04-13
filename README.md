@@ -69,6 +69,12 @@ This repository now includes a small CLI utility based on the WhatsMyName datase
 python3 src/core/whatsmyname_cli.py <username> --limit 50
 ```
 
+You can also search by email:
+
+```bash
+python3 src/core/whatsmyname_cli.py --email someone@example.com --limit 50
+```
+
 Useful options:
 - `--data-source <path-or-url>`: use local `wmn-data.json` file or a URL
 - `--category social --category coding`: filter categories

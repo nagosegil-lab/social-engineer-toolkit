@@ -29,6 +29,7 @@ DEFAULT_WORKERS = 20
 class CheckResult:
     site_name: str
     category: str
+    account_used: str
     url: str
     status: str
     http_code: int | None
@@ -37,9 +38,14 @@ class CheckResult:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Check a username against sites from the WhatsMyName dataset."
+        description="Check a username/email against sites from the WhatsMyName dataset."
     )
-    parser.add_argument("username", help="Username to search")
+    parser.add_argument("query", help="Username or email to search")
+    parser.add_argument(
+        "--email",
+        action="store_true",
+        help="Treat query as an email and test email-derived candidates",
+    )
     parser.add_argument(
         "--data-source",
         default=DEFAULT_DATA_URL,
@@ -85,6 +91,22 @@ def parse_args() -> argparse.Namespace:
         help="Output result as JSON",
     )
     return parser.parse_args()
+
+
+def build_account_candidates(query: str, email_mode: bool) -> List[str]:
+    if not email_mode:
+        return [query]
+
+    if "@" not in query:
+        raise ValueError("--email was provided but query is not a valid email address")
+
+    local_part = query.split("@", 1)[0]
+    local_part_no_plus = local_part.split("+", 1)[0]
+
+    candidates: List[str] = [query, local_part]
+    if local_part_no_plus and local_part_no_plus not in candidates:
+        candidates.append(local_part_no_plus)
+    return candidates
 
 
 def load_data(source: str, timeout: float) -> Dict[str, Any]:
@@ -136,18 +158,19 @@ def decide_status(
     return "unknown", "no clear match for exists/missing markers"
 
 
-def check_site(site: Dict[str, Any], username: str, timeout: float) -> CheckResult:
+def _check_single_account(site: Dict[str, Any], account: str, timeout: float) -> CheckResult:
     site_name = site.get("name", "unknown")
     category = site.get("cat", "unknown")
-    username_for_site = sanitize_username(username, site.get("strip_bad_char"))
-    encoded_username = quote(username_for_site, safe="")
-    uri_check = site.get("uri_check", "").replace("{account}", encoded_username)
+    account_for_site = sanitize_username(account, site.get("strip_bad_char"))
+    encoded_account = quote(account_for_site, safe="")
+    uri_check = site.get("uri_check", "").replace("{account}", encoded_account)
 
     if not uri_check.startswith("http://") and not uri_check.startswith("https://"):
         return CheckResult(
             site_name=site_name,
             category=category,
-            url=build_target_url(site, username_for_site),
+            account_used=account_for_site,
+            url=build_target_url(site, account_for_site),
             status="unknown",
             http_code=None,
             note="invalid uri_check",
@@ -157,7 +180,7 @@ def check_site(site: Dict[str, Any], username: str, timeout: float) -> CheckResu
     method = "POST" if site.get("post_body") else "GET"
     data = None
     if site.get("post_body"):
-        data = site["post_body"].replace("{account}", username_for_site)
+        data = site["post_body"].replace("{account}", account_for_site)
 
     try:
         response = requests.request(
@@ -179,7 +202,8 @@ def check_site(site: Dict[str, Any], username: str, timeout: float) -> CheckResu
         return CheckResult(
             site_name=site_name,
             category=category,
-            url=build_target_url(site, username_for_site),
+            account_used=account_for_site,
+            url=build_target_url(site, account_for_site),
             status=status,
             http_code=response.status_code,
             note=note,
@@ -188,11 +212,41 @@ def check_site(site: Dict[str, Any], username: str, timeout: float) -> CheckResu
         return CheckResult(
             site_name=site_name,
             category=category,
-            url=build_target_url(site, username_for_site),
+            account_used=account_for_site,
+            url=build_target_url(site, account_for_site),
             status="unknown",
             http_code=None,
             note=f"request error: {exc}",
         )
+
+
+def check_site(site: Dict[str, Any], accounts: List[str], timeout: float) -> CheckResult:
+    first_missing: CheckResult | None = None
+    first_unknown: CheckResult | None = None
+
+    for account in accounts:
+        result = _check_single_account(site, account, timeout)
+        if result.status == "found":
+            return result
+        if result.status == "missing" and first_missing is None:
+            first_missing = result
+        if result.status == "unknown" and first_unknown is None:
+            first_unknown = result
+
+    if first_missing is not None:
+        return first_missing
+    if first_unknown is not None:
+        return first_unknown
+
+    return CheckResult(
+        site_name=site.get("name", "unknown"),
+        category=site.get("cat", "unknown"),
+        account_used=accounts[0] if accounts else "",
+        url=build_target_url(site, accounts[0] if accounts else ""),
+        status="unknown",
+        http_code=None,
+        note="no result produced",
+    )
 
 
 def filter_sites(
@@ -213,6 +267,12 @@ def filter_sites(
 
 def main() -> int:
     args = parse_args()
+    try:
+        account_candidates = build_account_candidates(args.query, args.email)
+    except ValueError as exc:
+        print(f"Input error: {exc}")
+        return 1
+
     data = load_data(args.data_source, timeout=args.timeout)
     sites = filter_sites(
         data.get("sites", []),
@@ -230,7 +290,7 @@ def main() -> int:
     results: List[CheckResult] = []
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(check_site, site, args.username, args.timeout) for site in sites]
+        futures = [pool.submit(check_site, site, account_candidates, args.timeout) for site in sites]
         for future in as_completed(futures):
             results.append(future.result())
 
@@ -242,7 +302,9 @@ def main() -> int:
         print(
             json.dumps(
                 {
-                    "username": args.username,
+                    "query": args.query,
+                    "email_mode": args.email,
+                    "account_candidates": account_candidates,
                     "checked_sites": len(results),
                     "found_count": len(found),
                     "missing_count": len(missing),
@@ -257,20 +319,22 @@ def main() -> int:
         )
         return 0
 
-    print(f"Username: {args.username}")
+    print(f"Query: {args.query}")
+    if args.email:
+        print(f"Email mode: enabled ({', '.join(account_candidates)})")
     print(f"Checked sites: {len(results)}")
     print(f"Found: {len(found)} | Missing: {len(missing)} | Unknown: {len(unknown)}")
     print("")
     if found:
         print("[FOUND]")
         for item in found:
-            print(f"- {item.site_name} ({item.category}) -> {item.url}")
+            print(f"- {item.site_name} ({item.category}) [{item.account_used}] -> {item.url}")
         print("")
 
     if args.show_misses and missing:
         print("[MISSING]")
         for item in missing:
-            print(f"- {item.site_name} ({item.category}) [{item.http_code}]")
+            print(f"- {item.site_name} ({item.category}) [{item.account_used}] [{item.http_code}]")
         print("")
 
     if unknown:
