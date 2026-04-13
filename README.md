@@ -62,6 +62,21 @@ For a full document on how to use SET, [visit the SET user manual](https://githu
 
 <br/>
 
+## WhatsMyName username checker (CLI)
+This repository now includes a small CLI utility based on the WhatsMyName dataset.
+
+```bash
+python3 src/core/whatsmyname_cli.py <username> --limit 50
+```
+
+Useful options:
+- `--data-source <path-or-url>`: use local `wmn-data.json` file or a URL
+- `--category social --category coding`: filter categories
+- `--show-misses`: print sites where the username was not found
+- `--json`: machine-readable output
+
+<br/>
+
 ## Bugs and enhancements
 For bug reports or enhancements, please open an [issue](https://github.com/trustedsec/social-engineer-toolkit/issues) here.
 <br/>
