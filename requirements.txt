@@ -4,6 +4,7 @@ requests
 pyopenssl
 pefile
 impacket
+streamlit
 # Generate QR Codes
 qrcode
 pillow
