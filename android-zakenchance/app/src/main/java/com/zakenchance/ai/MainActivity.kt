@@ -7,13 +7,13 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -250,22 +250,20 @@ private fun ZakenChanceApp() {
             }
 
             SectionCard(title = "🤖 מחולל לוטו AI") {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = budgetInput,
-                        onValueChange = { budgetInput = it.filter { ch -> ch.isDigit() } },
-                        label = { Text("תקציב") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f),
-                    )
-                    OutlinedTextField(
-                        value = ticketPriceInput,
-                        onValueChange = { ticketPriceInput = it.filter { ch -> ch.isDigit() } },
-                        label = { Text("מחיר לטופס") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f),
-                    )
-                }
+                OutlinedTextField(
+                    value = budgetInput,
+                    onValueChange = { budgetInput = it.filter { ch -> ch.isDigit() } },
+                    label = { Text("תקציב") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = ticketPriceInput,
+                    onValueChange = { ticketPriceInput = it.filter { ch -> ch.isDigit() } },
+                    label = { Text("מחיר לטופס") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                )
 
                 if (maxTicketsByBudget <= 0) {
                     Text("התקציב לא מספיק אפילו לטופס אחד.", color = MaterialTheme.colorScheme.error)
@@ -432,7 +430,7 @@ private fun ZakenChanceApp() {
 }
 
 @Composable
-private fun SectionCard(title: String, content: @Composable Column.() -> Unit) {
+private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
