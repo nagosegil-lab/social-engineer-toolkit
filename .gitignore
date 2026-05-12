@@ -134,3 +134,8 @@ Network Trash Folder
 Temporary Items
 .apdisk
 
+# Android artifacts and signing files
+*.jks
+*.keystore
+**/local.properties
+

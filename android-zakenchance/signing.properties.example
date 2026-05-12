@@ -1,0 +1,6 @@
+# Copy these values to ~/.gradle/gradle.properties (or your CI secrets),
+# then build release with signing enabled.
+RELEASE_STORE_FILE=/absolute/path/to/your-release-key.jks
+RELEASE_STORE_PASSWORD=change-me
+RELEASE_KEY_ALIAS=zakenchance
+RELEASE_KEY_PASSWORD=change-me
