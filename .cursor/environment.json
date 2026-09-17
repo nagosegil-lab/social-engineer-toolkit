@@ -1,0 +1,4 @@
+{
+  "name": "Social-Engineer Toolkit (SET)",
+  "install": "bash .cursor/install.sh"
+}
